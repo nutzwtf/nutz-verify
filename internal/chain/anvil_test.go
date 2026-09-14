@@ -19,9 +19,10 @@ func TestAnvil(t *testing.T) {
 	w := buildWorld(t)
 
 	reader, err := New(Config{
-		Endpoints:   []string{w.rpc},
-		Token:       w.nutz,
-		Distributor: w.distributor,
+		Endpoints:      []string{w.rpc},
+		Token:          w.nutz,
+		Distributor:    w.distributor,
+		CallsPerSecond: unpaced, // a local node has no budget to respect
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -314,9 +315,10 @@ func TestAnvil(t *testing.T) {
 		// the canonical comparison against real responses: a comparison that spuriously
 		// disagreed would make every multi-endpoint run INDETERMINATE.
 		crossChecked, err := New(Config{
-			Endpoints:   []string{w.rpc, w.rpc},
-			Token:       w.nutz,
-			Distributor: w.distributor,
+			Endpoints:      []string{w.rpc, w.rpc},
+			Token:          w.nutz,
+			Distributor:    w.distributor,
+			CallsPerSecond: unpaced, // a local node has no budget to respect
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -337,9 +339,10 @@ func TestAnvil(t *testing.T) {
 		// Half of ADR-0002's cross-check is that an endpoint we cannot reach fails the read
 		// rather than being dropped in favour of the one that answered.
 		mixed, err := New(Config{
-			Endpoints:   []string{w.rpc, "http://127.0.0.1:1"},
-			Token:       w.nutz,
-			Distributor: w.distributor,
+			Endpoints:      []string{w.rpc, "http://127.0.0.1:1"},
+			Token:          w.nutz,
+			Distributor:    w.distributor,
+			CallsPerSecond: unpaced, // a local node has no budget to respect
 		})
 		if err != nil {
 			t.Fatal(err)

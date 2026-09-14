@@ -67,9 +67,11 @@ Two further properties of that endpoint, both relevant to §9 and §10:
   still refusing after five attempts is INDETERMINATE, because a wedged endpoint has to fail inside
   the Dispute window rather than hang in it.
 - **The block-timestamp join is the real cost, not the logs.** A log carries no timestamp, so every
-  block that produced one needs its header. At 5.4 logs per block essentially every block qualifies,
-  and at ~100 ms blocks that is **~864,000 header requests per day of history**. Batching or the
-  Cache has to absorb that; it is ticket 04's load test to say which.
+  block that produced one needs its header. At 5.4 logs per block essentially every block qualifies.
+  Ticket 04 measured what that costs and what the endpoint permits; the numbers are in §9. The short
+  version: the endpoint budgets **JSON-RPC calls, batched or not, at ~15–20 a second**, so a
+  from-scratch sync of a USDG-dense token is measured in weeks on the public endpoint and the Cache
+  is what makes that a one-time cost.
 
 Cross-checking two genuinely independent providers works: the public endpoint and a Chainstack
 archive return byte-identical logs over the same range, so the canonical comparison survives real
@@ -117,12 +119,89 @@ Flags: `--rpc` (repeatable; disagreement is INDETERMINATE), `--finality latest|s
 
 Truncate-to-last-valid-record on open; batched fsync on a checkpoint interval, never per record. Reorg: binary-search the fixed stride for the fork block, `Truncate(i * 124)`, fsync. Durability requirements are weak by construction — the log caches public data, so damage must be *detected*, not survived.
 
+Two additions ticket 04 made while building it, both guards rather than features: the header also carries the **start block** the history was read from, because two runs that disagree about it have different histories and the later-starting one is silently missing balances; and the file is **flock'd** while open, because the Signer's hourly run can overlap a manual one and two writers would interleave records that each verify and together run backwards. A mid-file record that fails its CRC is repaired the same way as a torn tail — truncate to the last good record and refetch — and the repair names the last good block, so disk damage is distinguishable from a wrong Root.
+
+### Load test — measured 2026-09-14 against the public endpoint
+
+**The chain and the token.** Chain 4663's block 1 is at 2026-04-30 and the tip on 2026-09-14 is
+block 63,184,647: **137 days, ~460,000 blocks a day, ~190 ms a block on average** — not the ~100 ms
+this spec assumed, because an Orbit chain only seals blocks when there is something to seal. USDG's
+first `Transfer` is at **block 433**, so its history is the whole chain. Density grows with the
+chain: 8 logs per 200 blocks at the start, ~1.5–2.6 per block through the middle, **7.4 per block at
+the tip**. Averaged, that is on the order of **150M records, ~19 GB** of Cache for the full history.
+
+**What the endpoint actually budgets.** Not requests: **JSON-RPC calls**, inside a batch or not.
+
+| Probe | Result |
+|---|---|
+| Sequential single headers, as fast as one connection goes (~7/s) | 400 of 400 accepted, no 429 |
+| Single headers at a fixed 5/s, 10/s, ~6/s for 40 s each | 0 refused |
+| Eight concurrent single headers (ticket 03's pool) | 71 calls in 3 s, then a 429 outlasting five retries |
+| One batch of 10 / 50 / 100 headers | accepted (100 headers is 218 KB, 0.5 s) |
+| One batch of 250 / 500 / 1,000 | 429 outright |
+| Batches of 100 at one per 10 s / 5 s / 3 s | 6/6, 3/6, 3/6 accepted |
+| Batches of 50 at one per 3 s / 1.5 s | 6/6, 5/6 accepted |
+| Batches of 20 at one per second | 6/6 accepted |
+| Batches of 100 at two per second | 78 of 79 refused |
+
+So: a token bucket of roughly 100 calls, refilling at roughly **15–20 calls a second**. Batching
+does not multiply the budget; it only reduces HTTP overhead. Two dead ends worth recording so nobody
+retries them: the endpoint runs `nitro/v3.11.4` whose `eth_getLogs` carries a `blockTimestamp`
+field, and it is **`0x0` on every log at every height**, so the header join cannot be skipped; and
+it answers **HTTP 403 to `Python-urllib`'s User-Agent** before any limit applies, which is a bot
+filter and not a quota (Go's and curl's agents pass).
+
+**What `internal/chain` now does.** Headers go out in **JSON-RPC batches of 20** (an endpoint that
+refuses batches is asked one at a time from then on), and every endpoint is **paced by a client-side
+token bucket** at `DefaultCallsPerSecond = 15`, counting each request inside a batch, two batches in
+flight. The 429 retry stays as the safety net. A keyed provider allows more and `--rate` (ticket 05)
+raises it; the default is sized for the endpoint a hostile stranger will use.
+
+**The load test** (`internal/cache`, `TestLive_SyncUSDGHistory`, nightly). 5,000 blocks of USDG
+history at the tip, blocks 63,182,650–63,187,649, synced from scratch into a throwaway Cache
+through the real `Reader`:
+
+| | |
+|---|---|
+| Wall time | **4 m 53 s** |
+| Records | 35,174 (**7.0 per block**) |
+| HTTP requests | 228 (3 log pages, ~225 header batches of 20), no 429 |
+| Effective pace | ~15 calls/s, **17 blocks/s** |
+| Replay of the file, every CRC verified | 4 ms, 8.3 M records/s (a 4 MB file, so mostly fixed cost) |
+
+The pace is the endpoint's budget being spent exactly, with nothing refused: the pacer is the
+difference between this and the first attempt, which earned a 429 71 calls in and did not finish.
+
+**What that means.**
+
+| Work | Headers | At 15 calls/s on the public endpoint |
+|---|---|---|
+| One hour of USDG history (~19,000 blocks) | ~19,000 | **~19 minutes** |
+| One day (~460,000 blocks) | ~460,000 | **~7.5 hours** (the test's own extrapolation from 17 blocks/s) |
+| USDG from block 433 (~63M blocks, maybe 50M with a log) | ~50M | **~5–6 weeks** |
+
+- **A from-scratch sync of a USDG-dense token on the public endpoint is decorative**, and no amount
+  of client cleverness changes that: the budget is the endpoint's. The Cache is what makes it a
+  one-time cost, and `Sync` resumes after every whole chunk, so a sync that takes days of
+  interrupted runs still converges. A keyed archive provider at, say, 250 calls/s does the same
+  history in ~2–3 days; that is the honest recommendation for whoever runs the warm Signer.
+- **The Dispute-window case fits, barely, on the public endpoint** — *if the Cache is warm*. Catching
+  up one hour costs ~21 minutes of a 30-minute window at USDG's density. A stranger with a cold
+  Cache cannot verify a USDG-dense token inside a window from the public endpoint; a stranger with a
+  Cache that is a few hours behind can.
+- **NUTZ is not USDG.** These are the pessimistic proxy's numbers. At a tenth of USDG's density —
+  one log every couple of blocks — the day is under an hour and the full history is a few days.
+  The measurement to redo at launch is the density, not the endpoint.
+- **Replay is not the cost.** Reading the Cache back with every CRC verified runs at the disk's
+  speed, tens of millions of records a second warm; ticket 07's concern (`--chain` quadratic over
+  `twab.Replay`) stands on its own and is unaffected by any of this.
+
 ## 10. Testing
 
 - **Cases** (`testdata/cases/`) for every §5 rule, hermetic, no RPC. Engineering spec §7 files these under "Indexer"; that contradicts §1 and §12 P0 and is wrong. They live here and the private indexer's CI consumes them.
 - **Merkle fixtures** seeded from `nutz-contracts/test/fixtures/claims.json` (root `0x88b4…7591`), grown here with odd leaf counts, a single leaf and duplicate amounts.
 - **Anvil harness**: fork 4663, run `nutz-contracts/script/Deploy.s.sol`, deploy a stand-in ERC-20, drive transfers and `postRoot`, verify end to end. The only way to test the chain-facing code before launch, and the thing that justifies hand-rolled decoding (ADR-0004).
-- **Load test**: point ingestion at USDG history on 4663. At ~100 ms blocks the real risk is volume, and this is the only way to learn before launch whether a from-scratch sync takes minutes or hours.
+- **Load test**: point ingestion at USDG history on 4663. Done in ticket 04, nightly since; the answer is in §9, and it is weeks on the public endpoint, not minutes or hours.
 - **Dry run**: the 48h throwaway launch of engineering spec §11 week 4.
 
 ## 11. Out of scope

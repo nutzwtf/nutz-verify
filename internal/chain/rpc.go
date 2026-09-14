@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -36,6 +37,12 @@ type endpoint struct {
 	label  string
 	client *http.Client
 	nextID atomic.Uint64
+
+	// noBatch is set once this endpoint has refused a batch request, so that every
+	// subsequent read asks one at a time rather than paying a refused request per batch.
+	noBatch atomic.Bool
+
+	pace *pacer
 }
 
 // newEndpoint checks the URL is one we can POST to before any run starts, rather than at the
@@ -44,7 +51,7 @@ type endpoint struct {
 // label is how this endpoint is named in errors: its position and host, never the URL. The
 // path of a provider URL is routinely an API key, and an error message is the one place a
 // Verifier's output reliably ends up pasted into an issue.
-func newEndpoint(raw string, position int, client *http.Client) (*endpoint, error) {
+func newEndpoint(raw string, position int, client *http.Client, callsPerSecond float64) (*endpoint, error) {
 	parsed, err := url.Parse(raw)
 	if err != nil {
 		return nil, fmt.Errorf("chain: endpoint %d: %w", position, err)
@@ -61,7 +68,43 @@ func newEndpoint(raw string, position int, client *http.Client) (*endpoint, erro
 		url:    raw,
 		label:  fmt.Sprintf("endpoint %d (%s)", position, parsed.Host),
 		client: client,
+		pace:   newPacer(callsPerSecond, 2*HeaderBatch),
 	}, nil
+}
+
+// pacer is a token bucket over JSON-RPC calls: the client-side half of the endpoint's own
+// limiter, so that the budget is spent rather than tripped.
+//
+// Tokens may go negative. A caller that finds the bucket empty is charged anyway and told
+// how long to wait for its debt to refill, which queues concurrent callers in arrival
+// order without a queue.
+type pacer struct {
+	mu       sync.Mutex
+	rate     float64 // tokens per second
+	capacity float64
+	tokens   float64
+	last     time.Time
+}
+
+func newPacer(rate, capacity float64) *pacer {
+	return &pacer{rate: rate, capacity: capacity, tokens: capacity, last: time.Now()}
+}
+
+// wait charges n calls and blocks until they are covered.
+func (p *pacer) wait(ctx context.Context, n int) error {
+	p.mu.Lock()
+	now := time.Now()
+	p.tokens = min(p.capacity, p.tokens+now.Sub(p.last).Seconds()*p.rate)
+	p.last = now
+	p.tokens -= float64(n)
+	debt := -p.tokens
+	p.mu.Unlock()
+
+	if debt <= 0 {
+		return nil
+	}
+
+	return waitFor(ctx, time.Duration(debt/p.rate*float64(time.Second)))
 }
 
 // RPCError is a JSON-RPC error object. It is carried as a type rather than flattened to a
@@ -83,6 +126,7 @@ type rpcRequest struct {
 }
 
 type rpcResponse struct {
+	ID     uint64          `json:"id"`
 	Result json.RawMessage `json:"result"`
 	Error  *RPCError       `json:"error"`
 }
@@ -111,26 +155,134 @@ const (
 // tip — and unmarshalling that into a header struct yields block zero, which is a confident
 // wrong answer rather than the INDETERMINATE this package owes its caller.
 func (e *endpoint) call(ctx context.Context, method string, params ...any) (json.RawMessage, error) {
-	if params == nil {
-		params = []any{}
-	}
-
-	body, err := json.Marshal(rpcRequest{JSONRPC: "2.0", ID: e.nextID.Add(1), Method: method, Params: params})
+	body, err := json.Marshal(e.request(method, params))
 	if err != nil {
 		return nil, fmt.Errorf("%s: encoding the request: %w", method, err)
 	}
 
+	raw, err := e.roundTrip(ctx, method, body, 1)
+	if err != nil {
+		return nil, err
+	}
+
+	var decoded rpcResponse
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return nil, fmt.Errorf("%s: decoding the response: %w", method, err)
+	}
+
+	return decoded.result(method)
+}
+
+// callBatch makes one HTTP request carrying one JSON-RPC request per params entry, and
+// returns the raw results in the same order.
+//
+// Replies are matched by id, never by position: the specification lets a node answer a
+// batch in any order, and a client that trusted position would stamp every transfer with
+// its neighbour's timestamp. Every request must be answered — a missing reply is an
+// endpoint that did not answer the question, not a block with no timestamp.
+//
+// An endpoint that does not batch answers with something other than an array, or refuses
+// the request outright; that is a batchRefused, and the caller asks one at a time instead.
+func (e *endpoint) callBatch(ctx context.Context, method string, params [][]any) ([]json.RawMessage, error) {
+	requests := make([]rpcRequest, 0, len(params))
+	for _, p := range params {
+		requests = append(requests, e.request(method, p))
+	}
+
+	body, err := json.Marshal(requests)
+	if err != nil {
+		return nil, fmt.Errorf("%s batch: encoding the request: %w", method, err)
+	}
+
+	raw, err := e.roundTrip(ctx, method+" batch", body, len(requests))
+	if err != nil {
+		var retry *retryable
+		if errors.As(err, &retry) {
+			return nil, err // it was retried and still refused; that is not "no batches"
+		}
+
+		return nil, &batchRefused{err: err}
+	}
+
+	var replies []rpcResponse
+	if err := json.Unmarshal(raw, &replies); err != nil {
+		// Not an array: a node without batch support answers a single error object.
+		var single rpcResponse
+		if json.Unmarshal(raw, &single) == nil && single.Error != nil {
+			return nil, &batchRefused{err: fmt.Errorf("%s batch: %w", method, single.Error)}
+		}
+
+		return nil, fmt.Errorf("%s batch: decoding the response: %w", method, err)
+	}
+
+	byID := make(map[uint64]rpcResponse, len(replies))
+	for _, r := range replies {
+		byID[r.ID] = r
+	}
+
+	out := make([]json.RawMessage, 0, len(requests))
+	for _, req := range requests {
+		reply, answered := byID[req.ID]
+		if !answered {
+			return nil, fmt.Errorf("%s batch: request %d of %d was not answered", method, req.ID, len(requests))
+		}
+
+		result, err := reply.result(method)
+		if err != nil {
+			return nil, err
+		}
+
+		out = append(out, result)
+	}
+
+	return out, nil
+}
+
+// batchRefused is an endpoint that does not take batch requests. Not an error about the
+// blocks asked for: the same question, asked one block at a time, may well be answered.
+type batchRefused struct{ err error }
+
+func (b *batchRefused) Error() string { return b.err.Error() }
+func (b *batchRefused) Unwrap() error { return b.err }
+
+func (e *endpoint) request(method string, params []any) rpcRequest {
+	if params == nil {
+		params = []any{}
+	}
+
+	return rpcRequest{JSONRPC: "2.0", ID: e.nextID.Add(1), Method: method, Params: params}
+}
+
+// result is the reply's result, or why there is none.
+func (r rpcResponse) result(method string) (json.RawMessage, error) {
+	if r.Error != nil {
+		return nil, fmt.Errorf("%s: %w", method, r.Error)
+	}
+	if isNull(r.Result) {
+		return nil, fmt.Errorf("%s: the endpoint has no answer", method)
+	}
+
+	return r.Result, nil
+}
+
+// roundTrip posts body, which carries calls JSON-RPC requests, and returns the response
+// body, pacing every attempt and retrying while the endpoint is asking us to wait.
+func (e *endpoint) roundTrip(ctx context.Context, what string, body []byte, calls int) ([]byte, error) {
 	var lastErr error
 	for attempt := range maxAttempts {
 		if attempt > 0 {
-			if err := wait(ctx, backoff(attempt, lastErr)); err != nil {
-				return nil, fmt.Errorf("%s: %w", method, err)
+			if err := waitFor(ctx, backoff(attempt, lastErr)); err != nil {
+				return nil, fmt.Errorf("%s: %w", what, err)
 			}
 		}
 
-		result, err := e.attempt(ctx, method, body)
+		if err := e.pace.wait(ctx, calls); err != nil {
+			return nil, fmt.Errorf("%s: %w", what, err)
+		}
+
+		raw, err := e.attempt(ctx, what, body)
 		if err == nil {
-			return result, nil
+			return raw, nil
 		}
 
 		lastErr = err
@@ -141,7 +293,7 @@ func (e *endpoint) call(ctx context.Context, method string, params ...any) (json
 		}
 	}
 
-	return nil, fmt.Errorf("%s: gave up after %d attempts: %w", method, maxAttempts, lastErr)
+	return nil, fmt.Errorf("%s: gave up after %d attempts: %w", what, maxAttempts, lastErr)
 }
 
 // retryable is an endpoint that is up and refusing for a reason that may pass: a rate limit,
@@ -157,16 +309,16 @@ type retryable struct {
 func (r *retryable) Error() string { return r.err.Error() }
 func (r *retryable) Unwrap() error { return r.err }
 
-func (e *endpoint) attempt(ctx context.Context, method string, body []byte) (json.RawMessage, error) {
+func (e *endpoint) attempt(ctx context.Context, what string, body []byte) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.url, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", method, err)
+		return nil, fmt.Errorf("%s: %w", what, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := e.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", method, err)
+		return nil, fmt.Errorf("%s: %w", what, err)
 	}
 	defer resp.Body.Close()
 
@@ -176,7 +328,7 @@ func (e *endpoint) attempt(ctx context.Context, method string, body []byte) (jso
 		// A rate limit and a gateway error both arrive as HTML often enough that the status
 		// line alone leaves a user guessing which endpoint to blame.
 		snippet, _ := io.ReadAll(io.LimitReader(limited, errorBodyLimit))
-		failure := fmt.Errorf("%s: http %s: %s", method, resp.Status, bytes.TrimSpace(snippet))
+		failure := fmt.Errorf("%s: http %s: %s", what, resp.Status, bytes.TrimSpace(snippet))
 
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
 			return nil, &retryable{status: resp.StatusCode, after: retryAfter(resp), err: failure}
@@ -185,18 +337,12 @@ func (e *endpoint) attempt(ctx context.Context, method string, body []byte) (jso
 		return nil, failure
 	}
 
-	var decoded rpcResponse
-	if err := json.NewDecoder(limited).Decode(&decoded); err != nil {
-		return nil, fmt.Errorf("%s: decoding the response: %w", method, err)
-	}
-	if decoded.Error != nil {
-		return nil, fmt.Errorf("%s: %w", method, decoded.Error)
-	}
-	if isNull(decoded.Result) {
-		return nil, fmt.Errorf("%s: the endpoint has no answer", method)
+	raw, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, fmt.Errorf("%s: reading the response: %w", what, err)
 	}
 
-	return decoded.Result, nil
+	return raw, nil
 }
 
 // retryAfter is the endpoint's own instruction, in the delta-seconds form providers actually
@@ -225,7 +371,7 @@ func backoff(attempt int, last error) time.Duration {
 	return time.Duration(rand.Int64N(int64(window)) + int64(retryBase))
 }
 
-func wait(ctx context.Context, d time.Duration) error {
+func waitFor(ctx context.Context, d time.Duration) error {
 	timer := time.NewTimer(d)
 	defer timer.Stop()
 

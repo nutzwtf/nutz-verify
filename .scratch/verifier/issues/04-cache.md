@@ -1,6 +1,6 @@
 # 04 — Append-only Cache with CRC, truncate-on-open and reorg truncation
 
-Status: ready-for-agent
+Status: resolved
 Type: task
 Spec: ../spec.md §9; ADR-0004
 Blocked by: 03
@@ -34,3 +34,80 @@ Recorded in ../spec.md §4 under "What the endpoints actually limit". The short 
   test should say whether eight header workers is already too many for that endpoint.
 - **NUTZ does not exist yet**, so its density is unknown. USDG is the pessimistic proxy spec §10
   names; the numbers above are an upper bound on the real workload, not an estimate of it.
+
+## Comments
+
+**2026-09-14 — implemented.**
+
+`internal/cache` is the flat file spec §9 describes: a 52-byte header (magic, format version,
+chain id, token, start block, CRC32C) and then 124-byte records, `[120-byte payload][4-byte
+CRC32C]`, payload `(blockNumber, blockHash, timestamp, from, to, value)`. Every record is verified
+on open and again on read; the file is truncated to the last good record on open; fsync is every
+10,000 records and on close, never per record; a reorg is a binary search over the stride and one
+`Truncate`. `Sync` verifies the newest held record at or below the caller's tip by block hash,
+finds the fork by binary search if it is gone, and then appends a chunk at a time so an
+interrupted sync resumes after its last whole chunk. `go.mod` is untouched.
+
+All four of the ticket's tests are there and pass: a torn tail self-heals and the next append lands
+after the last good record; a flipped bit is caught by the CRC and the repair names the last good
+block and how many records were dropped; a header from another chain (or token, or start block,
+or format version) refuses with an error that says `--fresh`; and a reorg found by `Sync` leaves a
+file byte-identical to a `--fresh` sync of the same history.
+
+**The load test is the finding, and it is not the one the ticket expected.** Numbers are in
+../spec.md §9; the shape:
+
+- **The public endpoint budgets JSON-RPC calls, batched or not, at ~15–20 a second** from a bucket
+  of ~100. Batching cuts HTTP overhead, not the budget. The first load test run tripped the bucket
+  71 calls in and the five retries did not outlast it, so the client now *spends* the budget on
+  purpose: `internal/chain` batches headers 20 at a time and paces every endpoint with a token
+  bucket at `DefaultCallsPerSecond = 15`, counting each request inside a batch. The 5,000-block run
+  then completed with nothing refused, at 17 blocks/s.
+- **At that pace a from-scratch sync of a USDG-dense token is ~5–6 weeks**, ~7.5 hours per day of
+  history, ~19 minutes per hour. The public endpoint cannot be made to do better; a keyed archive
+  provider with `--rate` raised is how the warm Signer should build its Cache, after which the
+  hourly catch-up fits inside a window. NUTZ's density decides whether any of this matters; USDG is
+  the pessimistic proxy and the number to remeasure at launch is the density.
+- **The chain is not at 100 ms blocks.** 63.18M blocks in 137 days is ~460,000 a day, ~190 ms
+  average; an Orbit chain seals on demand. `blocksPerDay` in the load test is the measured figure.
+- **Two dead ends recorded so nobody repeats them.** Nitro's `eth_getLogs` carries a
+  `blockTimestamp` field and it is `0x0` at every height, so the header join cannot be skipped. And
+  the endpoint answers 403 to `Python-urllib`'s User-Agent before any limit applies — the "short
+  403" ticket 03 attributed to pushing harder may have been this.
+
+### Decisions worth knowing
+
+- **Start block is in the header.** The ticket lists magic, version, chain id and address; the
+  header also carries the block the history was read from. Two runs disagreeing about it have
+  different histories and the later one is missing balances, which is a confident wrong answer of
+  the exact kind the header exists to refuse. It is the reason `cache.Options.Start` exists and
+  why ticket 05 has to pin it as a constant rather than a flag anyone can vary.
+- **One writer, enforced.** The file is `flock`'d while open. The Signer's hourly run overlapping a
+  manual one would interleave records that each verify and together run backwards; the scan
+  refuses a record behind its predecessor for the same reason, as a second line.
+- **A mid-file CRC failure heals like a torn tail** rather than refusing to open. Truncating there
+  throws away everything after it, all refetchable; refusing would make the user do the same thing
+  by hand with `--fresh`. `Repaired()` says what happened and names the last good block, so ticket
+  05 can print it and disk damage does not read as a wrong Root.
+- **No watermark, as specified, and it has a cost.** The file says nothing about blocks that were
+  read and carried no transfer, so every `Sync` re-reads from the last held record's block. Bounded
+  by how long the token has been quiet, and empty pages are cheap; noted in `Sync`'s doc comment
+  in case NUTZ turns out to be quiet enough for it to matter.
+- **The endpoint refusing batches degrades rather than fails.** A batch answered with a single
+  error object or a non-retryable HTTP status marks the endpoint `noBatch` and it is asked one
+  header at a time from then on; a 429 on a batch is retried as a batch, since that is not "no
+  batches". Replies are matched by id, never position, and every header is checked to be the block
+  asked for.
+- **Test readers are unpaced.** The pacer is for a public endpoint's budget; fake-node and anvil
+  readers pass `CallsPerSecond: unpaced` so the chain suite stays at ~13 s. The live tests keep the
+  default, which is the point of them.
+
+### Follow-ups, not done here
+
+- **`--rate` for ticket 05**, with the default printed in the run header (noted in 05).
+- **Memory at scale is ticket 07's problem, now with a number.** A full USDG history is ~150M
+  records; `twab.Replay` takes a slice, and 150M `Record`s is tens of GB in memory. `Each` streams
+  the file so the incremental ledger can consume it without a slice; `Replay` for a single Epoch
+  cannot, and at USDG's density a single `epoch` Recompute would need to.
+- **Nightly CI runs the load test** on the public endpoint (`live` job). It takes ~5 minutes and
+  prints the rate; a regression in the sync rate shows there.

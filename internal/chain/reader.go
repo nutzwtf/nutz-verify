@@ -32,12 +32,31 @@ import (
 // queries inside a cap nobody publishes.
 const MaxLogRange = 2000
 
-// defaultConcurrency is how many block headers are fetched at once.
+// HeaderBatch is how many block headers one request asks for.
 //
-// A log carries no timestamp, so every block that produced one needs its header, and that is
-// the round-trip-bound part of a sync. Small enough not to look like an attack to a
-// rate-limited public endpoint; large enough that the latency does not dominate.
-const defaultConcurrency = 8
+// A log carries no timestamp, so every block that produced one needs its header, and on
+// chain 4663 that is essentially every block: USDG runs at several Transfer logs per block.
+// One request per header cannot finish against the public endpoint — ticket 04's load test
+// measured 71 requests in three seconds earning a 429 that outlasted the retry budget — so
+// headers go out as JSON-RPC batches. An endpoint that does not batch is asked one at a
+// time, once it has said so.
+//
+// Twenty rather than the hundred the endpoint accepts in one go, because its limiter counts
+// the calls inside a batch: a batch of 100 drains the bucket and the next one is refused,
+// while batches of 20 at the sustainable rate all pass (measured 2026-09-14, spec §9).
+const HeaderBatch = 20
+
+// DefaultCallsPerSecond is the pace each endpoint is asked at when Config does not say.
+//
+// Chain 4663's public endpoint sustains about fifteen to twenty JSON-RPC calls a second,
+// batched or not, from a bucket of about a hundred. Spending that on purpose is what lets a
+// sync finish; bursting past it earns a 429 that outlasts the retry budget. A provider with
+// a bigger allowance is told so through Config.
+const DefaultCallsPerSecond = 15
+
+// defaultConcurrency is how many header batches are in flight at once. With the pace set
+// per endpoint this only needs to cover the latency of one request; more would just queue.
+const defaultConcurrency = 2
 
 // defaultTimeout bounds a single request. A hung endpoint must become INDETERMINATE rather
 // than a run that never ends, because the Dispute window does end.
@@ -125,6 +144,11 @@ type Config struct {
 	Token       Address
 	Distributor Address
 
+	// CallsPerSecond paces every endpoint, counting each request inside a batch as one.
+	// Zero is DefaultCallsPerSecond, sized for chain 4663's public endpoint; a keyed
+	// provider allows more and a user with one raises it.
+	CallsPerSecond float64
+
 	// HTTPClient and Concurrency are optional.
 	HTTPClient  *http.Client
 	Concurrency int
@@ -161,9 +185,17 @@ func New(cfg Config) (*Reader, error) {
 		concurrency = defaultConcurrency
 	}
 
+	rate := cfg.CallsPerSecond
+	if rate == 0 {
+		rate = DefaultCallsPerSecond
+	}
+	if rate < 0 {
+		return nil, fmt.Errorf("chain: %v calls per second is not a rate", rate)
+	}
+
 	r := &Reader{token: cfg.Token, distributor: cfg.Distributor, concurrency: concurrency}
 	for i, raw := range cfg.Endpoints {
-		e, err := newEndpoint(raw, i+1, client)
+		e, err := newEndpoint(raw, i+1, client, rate)
 		if err != nil {
 			return nil, err
 		}
@@ -277,25 +309,37 @@ func (r *Reader) BlockByNumber(ctx context.Context, number uint64) (Block, error
 // Timestamps resolves block numbers to block timestamps.
 //
 // A log carries no time of its own and the rules weigh Holders by seconds, so this is the
-// join between the two. One header per distinct block, fetched concurrently and cross-checked
-// individually; duplicates in the argument cost nothing.
+// join between the two. One header per distinct block, asked for HeaderBatch at a time,
+// batches fetched concurrently and each cross-checked; duplicates in the argument cost
+// nothing.
 func (r *Reader) Timestamps(ctx context.Context, blocks []uint64) (map[uint64]int64, error) {
 	wanted := slices.Clone(blocks)
 	slices.Sort(wanted)
 	wanted = slices.Compact(wanted)
 
+	batches := make([][]uint64, 0, len(wanted)/HeaderBatch+1)
+	for start := 0; start < len(wanted); start += HeaderBatch {
+		batches = append(batches, wanted[start:min(start+HeaderBatch, len(wanted))])
+	}
+
 	out := make(map[uint64]int64, len(wanted))
 	var mu sync.Mutex
 
-	if err := r.inParallel(ctx, len(wanted), func(ctx context.Context, i int) error {
-		block, err := r.BlockByNumber(ctx, wanted[i])
+	if err := r.inParallel(ctx, len(batches), func(ctx context.Context, i int) error {
+		numbers := batches[i]
+
+		headers, err := crossCheck(ctx, r, fmt.Sprintf("blocks %d..%d", numbers[0], numbers[len(numbers)-1]),
+			func(ctx context.Context, e *endpoint) ([]Block, error) { return e.blocksByNumber(ctx, numbers) },
+			canonicalBlocks)
 		if err != nil {
 			return err
 		}
 
 		mu.Lock()
 		defer mu.Unlock()
-		out[wanted[i]] = block.Timestamp
+		for _, h := range headers {
+			out[h.Number] = h.Timestamp
+		}
 
 		return nil
 	}); err != nil {
@@ -781,6 +825,82 @@ func (e *endpoint) blockByTag(ctx context.Context, tag string) (Block, error) {
 	}
 
 	return block, nil
+}
+
+// blocksByNumber reads the headers of numbers, in one batch where the endpoint allows it
+// and one at a time where it has said it does not.
+//
+// Every header is checked to be the block that was asked for. Replies are already matched
+// by id, but the id says which question was answered, not that the answer is the block the
+// question named.
+func (e *endpoint) blocksByNumber(ctx context.Context, numbers []uint64) ([]Block, error) {
+	if !e.noBatch.Load() {
+		blocks, err := e.batchBlocks(ctx, numbers)
+
+		var refused *batchRefused
+		if !errors.As(err, &refused) {
+			return blocks, err
+		}
+
+		e.noBatch.Store(true)
+	}
+
+	out := make([]Block, 0, len(numbers))
+	for _, n := range numbers {
+		block, err := e.blockByTag(ctx, quantity(n))
+		if err != nil {
+			return nil, err
+		}
+		if block.Number != n {
+			return nil, fmt.Errorf("chain: asked for block %d and was given block %d", n, block.Number)
+		}
+
+		out = append(out, block)
+	}
+
+	return out, nil
+}
+
+func (e *endpoint) batchBlocks(ctx context.Context, numbers []uint64) ([]Block, error) {
+	params := make([][]any, 0, len(numbers))
+	for _, n := range numbers {
+		params = append(params, []any{quantity(n), false})
+	}
+
+	results, err := e.callBatch(ctx, "eth_getBlockByNumber", params)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]Block, 0, len(numbers))
+	for i, raw := range results {
+		var wire wireBlock
+		if err := json.Unmarshal(raw, &wire); err != nil {
+			return nil, fmt.Errorf("eth_getBlockByNumber %d: %w", numbers[i], err)
+		}
+
+		block, err := wire.decode()
+		if err != nil {
+			return nil, fmt.Errorf("eth_getBlockByNumber %d: %w", numbers[i], err)
+		}
+		if block.Number != numbers[i] {
+			return nil, fmt.Errorf("chain: asked for block %d and was given block %d", numbers[i], block.Number)
+		}
+
+		out = append(out, block)
+	}
+
+	return out, nil
+}
+
+// canonicalBlocks is the form two endpoints' header batches are compared in.
+func canonicalBlocks(blocks []Block) []byte {
+	out := make([]byte, 0, len(blocks)*(8+2*wordSize+8))
+	for _, b := range blocks {
+		out = append(out, b.canonical()...)
+	}
+
+	return out
 }
 
 func (e *endpoint) getLogs(ctx context.Context, address Address, topic0 Hash, from, to uint64) ([]eventLog, error) {

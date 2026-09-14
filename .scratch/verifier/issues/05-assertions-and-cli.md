@@ -9,6 +9,8 @@ Implement `internal/report` and `cmd/nutz-verify`. Four Assertions reported as f
 
 Commands `epoch <id>`, `latest`, `sync`. Flags `--rpc` (repeatable), `--finality latest|safe|finalized` (default `safe`), `--fresh`, `--chain`, `--artifacts`, `--json`.
 
+**Added by ticket 04:** `--rate <calls per second>`, mapped to `chain.Config.CallsPerSecond`. The default (`chain.DefaultCallsPerSecond`, 15) is sized for chain 4663's public endpoint, which budgets JSON-RPC calls at ~15–20/s; a keyed provider allows far more and a from-scratch sync on the default takes weeks (../spec.md §9). Print the rate in the run header alongside the endpoints. The `sync` command should print `cache.Synced` (records appended, any reorg) and `cache.Repaired()` when non-nil, and `cache.Mismatch` is the error whose remedy is `--fresh`; `cache.Options.Start` is the token's creation block, which this ticket pins. Pass `cache.SyncOptions.Progress` something that prints — at USDG's density an hour of history is ~20 minutes of sync, and silence for 20 minutes reads as a hang.
+
 Exit `0` MATCH, `1` MISMATCH, `2` INDETERMINATE. **The load-bearing rule of this ticket is that `2` is never `0`.** INDETERMINATE covers: RPC error, no Root posted yet, the Epoch's end block not at the requested finality, endpoints disagreeing, cache unusable. The warm Signer signs only on `0`; anything that lets a failed check exit `0` silently converts the 2-of-3 into a 1-of-3.
 
 Every run's header echoes chain id, Distributor address, pinned `DEV_WALLET`, finality level and endpoints — ADR-0002 requires the unverifiable inputs be shown rather than buried. `--json` carries an explicit schema version; it is the Signer's interface and changing it is a breaking change.

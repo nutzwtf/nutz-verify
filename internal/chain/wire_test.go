@@ -121,7 +121,7 @@ func TestParseHash_RefusesNonHex(t *testing.T) {
 func TestNewEndpoint_RefusesAnUnparseableURL(t *testing.T) {
 	t.Parallel()
 
-	if _, err := newEndpoint("http://[::1", 1, nil); err == nil {
+	if _, err := newEndpoint("http://[::1", 1, nil, 1); err == nil {
 		t.Error("newEndpoint = nil error, want a refusal")
 	}
 }

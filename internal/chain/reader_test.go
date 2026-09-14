@@ -17,6 +17,11 @@ var (
 	bob         = repeatAddr(0xb2)
 )
 
+// unpaced is the rate a Reader over a fake node or a local anvil is built with: pacing is
+// for a public endpoint's budget (DefaultCallsPerSecond), and a test that waited for it
+// would be measuring the pacer rather than what it is about.
+const unpaced = 1e9
+
 func readerOver(t *testing.T, nodes ...*fakeNode) *Reader {
 	t.Helper()
 
@@ -25,7 +30,7 @@ func readerOver(t *testing.T, nodes ...*fakeNode) *Reader {
 		urls = append(urls, n.serve(t))
 	}
 
-	r, err := New(Config{Endpoints: urls, Token: nutz, Distributor: distributor})
+	r, err := New(Config{Endpoints: urls, Token: nutz, Distributor: distributor, CallsPerSecond: unpaced})
 	if err != nil {
 		t.Fatalf("New = %v", err)
 	}

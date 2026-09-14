@@ -257,7 +257,7 @@ func TestCall_RefusesABodyThatIsNotJSONRPC(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	r, err := New(Config{Endpoints: []string{server.URL}, Token: nutz, Distributor: distributor})
+	r, err := New(Config{Endpoints: []string{server.URL}, Token: nutz, Distributor: distributor, CallsPerSecond: unpaced})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ func TestCall_AnEndpointThatIsNotListening(t *testing.T) {
 	url := server.URL
 	server.Close() // the port is now closed, which is a provider outage in miniature
 
-	r, err := New(Config{Endpoints: []string{url}, Token: nutz, Distributor: distributor})
+	r, err := New(Config{Endpoints: []string{url}, Token: nutz, Distributor: distributor, CallsPerSecond: unpaced})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -483,7 +483,7 @@ func TestReads_RefuseARangeThatRunsBackwards(t *testing.T) {
 func TestNewEndpoint_RefusesAURLWithNoHost(t *testing.T) {
 	t.Parallel()
 
-	if _, err := newEndpoint("http:///rpc", 1, nil); err == nil {
+	if _, err := newEndpoint("http:///rpc", 1, nil, 1); err == nil {
 		t.Error("newEndpoint = nil error, want a refusal")
 	}
 }

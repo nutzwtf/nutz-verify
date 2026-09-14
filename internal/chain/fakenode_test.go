@@ -1,11 +1,14 @@
 package chain
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync"
 	"testing"
 )
@@ -38,6 +41,17 @@ type fakeNode struct {
 	// httpStatus, when non-zero, is returned instead of a JSON-RPC reply at all.
 	httpStatus int
 
+	// noBatch answers a batch request the way a node without batch support does: one
+	// error object rather than an array. shuffleBatch answers a batch in reverse order,
+	// which the JSON-RPC spec allows and which a client that trusts position gets wrong.
+	noBatch      bool
+	shuffleBatch bool
+
+	// dropFromBatch leaves the last reply out of a batch's answer. batchHTTPStatus, when
+	// non-zero, is the HTTP status a batch request gets instead of a reply.
+	dropFromBatch   bool
+	batchHTTPStatus int
+
 	// refuseFirst is how many requests answer refuseWith before the node starts behaving,
 	// which is how a rate limit that passes looks from the client side. retryAfter, when set,
 	// is sent as the Retry-After header.
@@ -57,6 +71,7 @@ type fakeNode struct {
 	mu       sync.Mutex
 	ranges   []string
 	requests []string
+	batches  []int // the size of every batch request seen
 }
 
 func newFakeNode(blocks int, interval int64) *fakeNode {
@@ -102,8 +117,22 @@ func (n *fakeNode) serve(t *testing.T) string {
 }
 
 func (n *fakeNode) handle(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+
+		return
+	}
+
+	// A batch is a JSON array of requests, answered by an array of replies in any order.
+	if bytes.HasPrefix(bytes.TrimSpace(body), []byte("[")) {
+		n.handleBatch(w, body)
+
+		return
+	}
+
 	var req rpcRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 
 		return
@@ -113,10 +142,66 @@ func (n *fakeNode) handle(w http.ResponseWriter, r *http.Request) {
 	n.requests = append(n.requests, req.Method)
 	n.mu.Unlock()
 
+	if n.gate(w) {
+		return
+	}
+
+	n.answer(req).write(w)
+}
+
+func (n *fakeNode) handleBatch(w http.ResponseWriter, body []byte) {
+	var reqs []rpcRequest
+	if err := json.Unmarshal(body, &reqs); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+
+		return
+	}
+
+	n.mu.Lock()
+	n.batches = append(n.batches, len(reqs))
+	for _, req := range reqs {
+		n.requests = append(n.requests, req.Method)
+	}
+	n.mu.Unlock()
+
+	if n.gate(w) {
+		return
+	}
+
+	if n.batchHTTPStatus != 0 {
+		http.Error(w, "batch requests are not accepted here", n.batchHTTPStatus)
+
+		return
+	}
+
+	if n.noBatch {
+		(&fakeReply{Error: &RPCError{Code: -32600, Message: "batch requests are not supported"}}).write(w)
+
+		return
+	}
+
+	replies := make([]*fakeReply, 0, len(reqs))
+	for _, req := range reqs {
+		replies = append(replies, n.answer(req))
+	}
+	if n.shuffleBatch {
+		slices.Reverse(replies)
+	}
+	if n.dropFromBatch {
+		replies = replies[:len(replies)-1]
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(replies)
+}
+
+// gate applies the whole-request failures — an HTTP status, or a refusal that passes — and
+// reports whether it consumed the request.
+func (n *fakeNode) gate(w http.ResponseWriter) bool {
 	if n.httpStatus != 0 {
 		http.Error(w, "upstream is having a moment", n.httpStatus)
 
-		return
+		return true
 	}
 
 	n.mu.Lock()
@@ -132,29 +217,28 @@ func (n *fakeNode) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Error(w, "slow down", n.refuseWith)
 
-		return
+		return true
 	}
 
-	if result, staged := n.override[req.Method]; staged {
-		n.reply(w, req.ID, result, nil)
+	return false
+}
 
-		return
+// answer is the reply to one request, staged failures included.
+func (n *fakeNode) answer(req rpcRequest) *fakeReply {
+	if result, staged := n.override[req.Method]; staged {
+		return n.reply(req.ID, result, nil)
 	}
 
 	if message, failing := n.failWith[req.Method]; failing {
-		n.reply(w, req.ID, nil, &RPCError{Code: -32000, Message: message})
-
-		return
+		return n.reply(req.ID, nil, &RPCError{Code: -32000, Message: message})
 	}
 
 	result, err := n.dispatch(req)
 	if err != nil {
-		n.reply(w, req.ID, nil, &RPCError{Code: -32602, Message: err.Error()})
-
-		return
+		return n.reply(req.ID, nil, &RPCError{Code: -32602, Message: err.Error()})
 	}
 
-	n.reply(w, req.ID, result, nil)
+	return n.reply(req.ID, result, nil)
 }
 
 func (n *fakeNode) dispatch(req rpcRequest) (any, error) {
@@ -249,21 +333,25 @@ func (n *fakeNode) getLogs(filter map[string]any) (any, error) {
 	return out, nil
 }
 
-func (n *fakeNode) reply(w http.ResponseWriter, id uint64, result any, rpcErr *RPCError) {
+type fakeReply struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      uint64          `json:"id"`
+	Result  json.RawMessage `json:"result"`
+	Error   *RPCError       `json:"error,omitempty"`
+}
+
+func (n *fakeNode) reply(id uint64, result any, rpcErr *RPCError) *fakeReply {
 	encoded, err := json.Marshal(result)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-
-		return
+		panic(err) // a test staged something json cannot encode
 	}
 
+	return &fakeReply{JSONRPC: "2.0", ID: id, Result: encoded, Error: rpcErr}
+}
+
+func (r *fakeReply) write(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(struct {
-		JSONRPC string          `json:"jsonrpc"`
-		ID      uint64          `json:"id"`
-		Result  json.RawMessage `json:"result"`
-		Error   *RPCError       `json:"error,omitempty"`
-	}{JSONRPC: "2.0", ID: id, Result: encoded, Error: rpcErr})
+	_ = json.NewEncoder(w).Encode(r)
 }
 
 func (n *fakeNode) seenRanges() []string {
