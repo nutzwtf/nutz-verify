@@ -3,9 +3,9 @@
 Status: ready-for-agent
 Type: task
 Spec: ../spec.md §7, §8; ADR-0002
-Blocked by: 04
+Blocked by: 04, 07
 
-Implement `internal/report` and `cmd/nutz-verify`. Four Assertions reported as four separate lines: Root equality, `totals` equality, the cap `totals[i] <= funded[i] + carryIn[i]`, and `carryIn` against what the previous Epoch should have left. Four lines, not one boolean — a MISMATCH has to say *which* invariant broke, or a 3am dispute is unactionable. Full Carry chain back to deploy behind `--chain`.
+Implement `internal/report` and `cmd/nutz-verify`. Four Assertions reported as four separate lines: Root equality, `totals` equality, the cap `totals[i] <= funded[i] + carryIn[i]`, and `carryIn` against what the previous Epoch should have left. Four lines, not one boolean — a MISMATCH has to say *which* invariant broke, or a 3am dispute is unactionable. Full Carry chain back to deploy behind `--chain`, which **depends on ticket 07**: over the per-Epoch `twab.Replay` of ticket 02 the full chain is quadratic and measures in hours, not minutes.
 
 Commands `epoch <id>`, `latest`, `sync`. Flags `--rpc` (repeatable), `--finality latest|safe|finalized` (default `safe`), `--fresh`, `--chain`, `--artifacts`, `--json`.
 

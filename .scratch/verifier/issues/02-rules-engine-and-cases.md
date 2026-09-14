@@ -83,18 +83,20 @@ which is what that Case exists for. 100% statement coverage, `-race` clean, `go 
 
 ### Follow-ups, not done here
 
-- **`Replay` re-walks the whole transfer history for every Epoch.** Correct and fine for the
-  Cases, but a from-scratch sync over USDG-scale history will feel it. The seam takes pre-seeded
-  opening balances without any change to the Case format — for tickets 03 and 04, alongside the
-  load test of spec §10.
+- **`Replay` re-walks the whole transfer history for every Epoch** — now **ticket 07**, with
+  measurements. A single Recompute is fine (≈ 4 s against a 10M-transfer history, against a
+  30-minute Dispute window), so this is narrower than it first looked: it is `--chain` that is
+  quadratic, at roughly 5 hours on the same history. No change to the Case format.
 - **The end-block half of §5's window resolution is unpinned here.** No hermetic Case can express
   which blocks a Recompute reads; `internal/chain` needs its own test that the end block is the
   last with `timestamp < 3600(e+1)`.
-- **Ask `nutz-contracts` to confirm the zero-value-transfer reading.** If they agree, it earns a
-  committed Case and becomes normative for the indexer; until then it is only a Go test.
+- **Confirm the streak's transfer semantics with `nutz-contracts`** — now **ticket 08**. Three
+  readings, not one: a zero-value transfer, a self-transfer and a mint. All three are implemented
+  literally and pinned by Go tests rather than Cases, because a Case is normative for the indexer
+  and would manufacture the divergence it exists to catch.
 - **The exclusion set hash** of engineering spec §4.5, `keccak256(abi.encodePacked(set))`, is not
-  implemented: it is a cross-check against a published artifact, so it belongs with `--artifacts`
-  in ticket 05.
+  implemented here. It is already in ticket 03's scope, which owns the Excluded set and the
+  keccak the Case format has no need of.
 - Carried over from ticket 01 and still open: no `LICENSE` at the repo root though spec §3 says
   MIT; `go.mod` says `go 1.24.0` rather than spec §3's conservative directive; and nothing
   exports the fixture set to the Solidity and TypeScript implementations ADR-0003 names.
