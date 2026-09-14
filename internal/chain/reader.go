@@ -93,6 +93,15 @@ func (e *EpochNotClosed) Error() string {
 type Tip struct {
 	Block    Block
 	Finality Finality
+
+	// Lag is how many blocks the slowest endpoint is behind the fastest.
+	//
+	// Head reconciles differing tips by taking the lowest, which is right — it asks only for
+	// blocks every endpoint has — but it means one endpoint stuck a long way back silently
+	// sets the horizon for the whole run, and a recent Epoch then reads as not yet closed
+	// for no visible reason. Ticket 05's header prints this so the reason is visible. Zero
+	// with a single endpoint, which is its own disclosure.
+	Lag uint64
 }
 
 // Config is what a Reader needs to talk to a chain.
@@ -231,7 +240,9 @@ func (r *Reader) Head(ctx context.Context, level Finality) (Tip, error) {
 		return Tip{}, err
 	}
 
-	lowest := slices.MinFunc(tips, func(a, b Block) int { return cmp.Compare(a.Number, b.Number) })
+	byNumber := func(a, b Block) int { return cmp.Compare(a.Number, b.Number) }
+	lowest := slices.MinFunc(tips, byNumber)
+
 	if len(r.endpoints) == 1 {
 		return Tip{Block: lowest, Finality: level}, nil
 	}
@@ -241,7 +252,9 @@ func (r *Reader) Head(ctx context.Context, level Finality) (Tip, error) {
 		return Tip{}, err
 	}
 
-	return Tip{Block: agreed, Finality: level}, nil
+	highest := slices.MaxFunc(tips, byNumber)
+
+	return Tip{Block: agreed, Finality: level, Lag: highest.Number - lowest.Number}, nil
 }
 
 // BlockByNumber reads one header, cross-checked. Two endpoints disagreeing here is a fork or
@@ -301,12 +314,8 @@ func (r *Reader) Transfers(ctx context.Context, from, to uint64) ([]Transfer, er
 		out = append(out, transfer)
 	}
 
-	stamps, err := stampsFor(ctx, r, out, func(t Transfer) uint64 { return t.BlockNumber })
-	if err != nil {
+	if err := stamp(ctx, r, out, func(t *Transfer) *Site { return &t.Site }); err != nil {
 		return nil, err
-	}
-	for i := range out {
-		out[i].Timestamp = stamps[out[i].BlockNumber]
 	}
 
 	return out, nil
@@ -333,12 +342,8 @@ func (r *Reader) Exclusions(ctx context.Context, from, to uint64) ([]Exclusion, 
 		out = append(out, exclusion)
 	}
 
-	stamps, err := stampsFor(ctx, r, out, func(e Exclusion) uint64 { return e.BlockNumber })
-	if err != nil {
+	if err := stamp(ctx, r, out, func(e *Exclusion) *Site { return &e.Site }); err != nil {
 		return nil, err
-	}
-	for i := range out {
-		out[i].Timestamp = stamps[out[i].BlockNumber]
 	}
 
 	return out, nil
@@ -364,12 +369,8 @@ func (r *Reader) Roots(ctx context.Context, from, to uint64) ([]RootPosted, erro
 		out = append(out, posted)
 	}
 
-	stamps, err := stampsFor(ctx, r, out, func(p RootPosted) uint64 { return p.BlockNumber })
-	if err != nil {
+	if err := stamp(ctx, r, out, func(p *RootPosted) *Site { return &p.Site }); err != nil {
 		return nil, err
-	}
-	for i := range out {
-		out[i].Timestamp = stamps[out[i].BlockNumber]
 	}
 
 	return out, nil
@@ -513,23 +514,36 @@ func (r *Reader) callAt(ctx context.Context, what string, data []byte, at uint64
 		func(b []byte) []byte { return b })
 }
 
-// stampsFor resolves the block timestamps of a decoded log slice.
-func stampsFor[T any](ctx context.Context, r *Reader, events []T, blockOf func(T) uint64) (map[uint64]int64, error) {
+// stamp fills in the block timestamps of a decoded log slice.
+//
+// siteOf is how each event surrenders its Site: the three event types differ in everything
+// else, and this is the only part of reading them that is the same.
+func stamp[T any](ctx context.Context, r *Reader, events []T, siteOf func(*T) *Site) error {
 	blocks := make([]uint64, 0, len(events))
-	for _, e := range events {
-		blocks = append(blocks, blockOf(e))
+	for i := range events {
+		blocks = append(blocks, siteOf(&events[i]).BlockNumber)
 	}
 
-	return r.Timestamps(ctx, blocks)
+	stamps, err := r.Timestamps(ctx, blocks)
+	if err != nil {
+		return err
+	}
+
+	for i := range events {
+		site := siteOf(&events[i])
+		site.Timestamp = stamps[site.BlockNumber]
+	}
+
+	return nil
 }
 
 // crossCheck asks every endpoint the same pinned question and returns the answer only if all
 // of them gave it.
 //
 // An endpoint that errors fails the whole read rather than being dropped in favour of the
-// ones that answered. Falling back to a quorum of the reachable would mean the cross-check
-// quietly weakens exactly when an endpoint is unavailable, which is the moment ADR-0002 is
-// worried about; a user who wants one endpoint's answer passes one endpoint.
+// ones that answered. Settling for whichever endpoints happened to reply would mean the
+// cross-check quietly weakens exactly when an endpoint is unavailable, which is the moment
+// ADR-0002 is worried about; a user who wants one endpoint's answer passes one endpoint.
 func crossCheck[T any](
 	ctx context.Context,
 	r *Reader,
@@ -572,21 +586,46 @@ func crossCheck[T any](
 	return answers[0], nil
 }
 
+// firstFailure is the earliest error of a fan-out, and the cancellation of everything still
+// running when it arrives.
+//
+// First to fail, not lowest-numbered. The first failure cancels the rest, so everything after
+// it reports a cancellation we caused ourselves; picking the lowest-numbered of those would
+// blame a healthy endpoint for its neighbour being down, which is the opposite of what the
+// caller needs to act on.
+type firstFailure struct {
+	cancel context.CancelFunc
+
+	mu  sync.Mutex
+	err error
+}
+
+// record keeps err if it is the first, and stops the others paying for a read that has
+// already failed.
+func (f *firstFailure) record(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if f.err == nil {
+		f.err = err
+		f.cancel()
+	}
+}
+
+func (f *firstFailure) result() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return f.err
+}
+
 // eachEndpoint runs one read against every endpoint at once, and reports the failure that
 // came first so "which one is down" is never a guess.
-//
-// First to fail, not lowest-numbered: the first failure cancels the others, so every endpoint
-// after it reports a cancellation we caused ourselves. Naming the lowest-numbered of those
-// would blame a healthy endpoint for its neighbour being down, which is the opposite of what
-// the caller needs to act on.
 func (r *Reader) eachEndpoint(ctx context.Context, fn func(context.Context, int, *endpoint) error) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	var (
-		mu      sync.Mutex
-		failure error
-	)
+	failed := &firstFailure{cancel: cancel}
 
 	var wg sync.WaitGroup
 	for i, e := range r.endpoints {
@@ -594,23 +633,14 @@ func (r *Reader) eachEndpoint(ctx context.Context, fn func(context.Context, int,
 		go func() {
 			defer wg.Done()
 
-			err := fn(ctx, i, e)
-			if err == nil {
-				return
-			}
-
-			mu.Lock()
-			defer mu.Unlock()
-
-			if failure == nil {
-				failure = fmt.Errorf("chain: %s: %w", e.label, err)
-				cancel() // the read has already failed; do not make the others finish paying
+			if err := fn(ctx, i, e); err != nil {
+				failed.record(fmt.Errorf("chain: %s: %w", e.label, err))
 			}
 		}()
 	}
 	wg.Wait()
 
-	return failure
+	return failed.result()
 }
 
 // inParallel runs n indexed jobs over a bounded pool, stopping at the first failure.
@@ -623,11 +653,7 @@ func (r *Reader) inParallel(ctx context.Context, n int, fn func(context.Context,
 	defer cancel()
 
 	jobs := make(chan int)
-
-	var (
-		mu      sync.Mutex
-		failure error
-	)
+	failed := &firstFailure{cancel: cancel}
 
 	var wg sync.WaitGroup
 	for range min(n, r.concurrency) {
@@ -636,19 +662,11 @@ func (r *Reader) inParallel(ctx context.Context, n int, fn func(context.Context,
 			defer wg.Done()
 
 			for i := range jobs {
-				err := fn(ctx, i)
-				if err == nil {
-					continue
-				}
+				if err := fn(ctx, i); err != nil {
+					failed.record(err)
 
-				mu.Lock()
-				if failure == nil {
-					failure = err
-					cancel() // as above: the first failure is the one worth reporting
+					return
 				}
-				mu.Unlock()
-
-				return
 			}
 		}()
 	}
@@ -662,8 +680,8 @@ func (r *Reader) inParallel(ctx context.Context, n int, fn func(context.Context,
 	close(jobs)
 	wg.Wait()
 
-	if failure != nil {
-		return failure
+	if err := failed.result(); err != nil {
+		return err
 	}
 
 	return ctx.Err()

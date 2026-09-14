@@ -26,7 +26,10 @@ import (
 // we made twice in the same direction would cancel out in a round trip; it cannot cancel out
 // against foundry.
 //
-// The test skips, loudly and with the reason, when the tools or the contracts are not here.
+// The test skips, loudly and with the reason, when the tools or the contracts are not here —
+// unless NUTZ_VERIFY_REQUIRE_ANVIL is set, which turns every one of those skips into a
+// failure. CI sets it. A harness that quietly does not run is ADR-0004's bargain quietly not
+// being kept: a green suite with none of the decoders ever having met a node.
 
 // The well-known anvil development keys. Public constants of the tool, funded on every fresh
 // node, and worthless anywhere else.
@@ -67,24 +70,27 @@ func startAnvil(t *testing.T) *anvil {
 
 	port, err := freePort()
 	if err != nil {
-		t.Skipf("anvil harness: no free port: %v", err)
+		unavailable(t, "anvil harness: no free port: %v", err)
 	}
 
 	args := []string{"--port", fmt.Sprint(port), "--host", "127.0.0.1", "--silent"}
 
 	forkURL := firstEnv("NUTZ_VERIFY_FORK_RPC", "RPC_4663")
-	if forkURL != "" {
-		args = append(args, "--fork-url", forkURL)
-	} else {
+	if forkURL == "" {
+		// A bare node still exercises every decoder, which is what ADR-0004 needs, so this
+		// degrades rather than stopping. What it cannot answer is anything about chain 4663
+		// itself, so the subtests that ask about the chain skip themselves. Required mode
+		// insists on the real thing.
+		requireFork(t)
 		args = append(args, "--chain-id", fmt.Sprint(harnessChainID))
-		t.Logf("anvil harness: no NUTZ_VERIFY_FORK_RPC or RPC_4663, so this is a bare node and " +
-			"not the fork of 4663 spec §10 asks for")
+	} else {
+		args = append(args, "--fork-url", forkURL)
 	}
 
 	cmd := exec.Command("anvil", args...)
 	cmd.Dir = contracts
 	if err := cmd.Start(); err != nil {
-		t.Skipf("anvil harness: %v", err)
+		unavailable(t, "anvil harness: %v", err)
 	}
 
 	t.Cleanup(func() {
@@ -126,7 +132,7 @@ func (a *anvil) await() {
 		time.Sleep(200 * time.Millisecond)
 	}
 
-	a.t.Skipf("anvil harness: the node at %s never answered", a.rpc)
+	unavailable(a.t, "anvil harness: the node at %s never answered", a.rpc)
 }
 
 // cast runs one foundry command and returns its trimmed output.
@@ -299,7 +305,7 @@ func (a *anvil) bytecode(contract string) string {
 
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		a.t.Skipf("anvil harness: %v; run `forge build` in %s", err, a.contracts)
+		unavailable(a.t, "anvil harness: %v; run `forge build` in %s", err, a.contracts)
 	}
 
 	var artifact struct {
@@ -331,10 +337,10 @@ func contractsDir(t *testing.T) string {
 
 	absolute, err := filepath.Abs(dir)
 	if err != nil {
-		t.Skipf("anvil harness: %v", err)
+		unavailable(t, "anvil harness: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(absolute, "foundry.toml")); err != nil {
-		t.Skipf("anvil harness: no nutz-contracts checkout at %s; set NUTZ_CONTRACTS", absolute)
+		unavailable(t, "anvil harness: no nutz-contracts checkout at %s; set NUTZ_CONTRACTS", absolute)
 	}
 
 	return absolute
@@ -347,8 +353,41 @@ func requireTool(t *testing.T, dir, name string) {
 	cmd.Dir = dir
 
 	if err := cmd.Run(); err != nil {
-		t.Skipf("anvil harness: %s is not runnable from %s: %v", name, dir, err)
+		unavailable(t, "anvil harness: %s is not runnable from %s: %v", name, dir, err)
 	}
+}
+
+// unavailable ends the harness: a skip normally, a failure when NUTZ_VERIFY_REQUIRE_ANVIL is
+// set.
+//
+// ADR-0004 trades "we own the decoding bugs" for "the anvil harness exercises every decoder
+// against a real node before launch". A machine without foundry should still be able to run
+// `go test ./...`, so the default is a skip — but somewhere that trade has to be enforced, and
+// a skip nobody reads does not enforce it. CI sets the variable and a missing tool, a missing
+// contracts checkout or a missing fork URL all fail there.
+func unavailable(t *testing.T, format string, args ...any) {
+	t.Helper()
+
+	if os.Getenv("NUTZ_VERIFY_REQUIRE_ANVIL") != "" {
+		t.Fatalf(format, args...)
+	}
+
+	t.Skipf(format, args...)
+}
+
+// requireFork reports the degradation to a bare node — fatally in required mode, where "the
+// fork of 4663" is the point, and as a log otherwise.
+func requireFork(t *testing.T) {
+	t.Helper()
+
+	const message = "anvil harness: no NUTZ_VERIFY_FORK_RPC or RPC_4663, so this is a bare node " +
+		"and not the fork of 4663 spec §10 asks for"
+
+	if os.Getenv("NUTZ_VERIFY_REQUIRE_ANVIL") != "" {
+		t.Fatal(message)
+	}
+
+	t.Log(message)
 }
 
 func firstEnv(names ...string) string {

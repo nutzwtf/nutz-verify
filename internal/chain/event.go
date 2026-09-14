@@ -64,14 +64,7 @@ func decodeTransfer(l eventLog) (Transfer, error) {
 		return Transfer{}, fmt.Errorf("chain: Transfer at block %d index %d: to %w", l.BlockNumber, l.LogIndex, err)
 	}
 
-	return Transfer{
-		BlockNumber: l.BlockNumber,
-		BlockHash:   l.BlockHash,
-		LogIndex:    l.LogIndex,
-		From:        from,
-		To:          to,
-		Value:       wordUint256(l.Data),
-	}, nil
+	return Transfer{Site: l.site(), From: from, To: to, Value: wordUint256(l.Data)}, nil
 }
 
 // rootPostedWords is RootPosted's unindexed payload: root, totals[5], carryIn[5]. A fixed
@@ -98,13 +91,7 @@ func decodeRootPosted(l eventLog) (RootPosted, error) {
 		return RootPosted{}, fmt.Errorf("%s: id %w", at, err)
 	}
 
-	posted := RootPosted{
-		BlockNumber: l.BlockNumber,
-		BlockHash:   l.BlockHash,
-		LogIndex:    l.LogIndex,
-		Kind:        Kind(kind),
-		ID:          id,
-	}
+	posted := RootPosted{Site: l.site(), Kind: Kind(kind), ID: id}
 	copy(posted.Root[:], l.Data[:wordSize])
 
 	for i := range posted.Totals {
@@ -128,12 +115,12 @@ func decodeExcludedAppended(l eventLog) (Exclusion, error) {
 			l.BlockNumber, l.LogIndex, err)
 	}
 
-	return Exclusion{
-		BlockNumber: l.BlockNumber,
-		BlockHash:   l.BlockHash,
-		LogIndex:    l.LogIndex,
-		Account:     account,
-	}, nil
+	return Exclusion{Site: l.site(), Account: account}, nil
+}
+
+// site is where this log sat, minus the timestamp the Reader fills in later.
+func (l eventLog) site() Site {
+	return Site{BlockNumber: l.BlockNumber, BlockHash: l.BlockHash, LogIndex: l.LogIndex}
 }
 
 // dataWord is word i of an already length-checked static payload.

@@ -45,8 +45,13 @@ func TestAnvil(t *testing.T) {
 	})
 
 	t.Run("every finality tag is served", func(t *testing.T) {
-		// A node that does not serve safe or finalized answers null, and spec §4's default
-		// is safe. Finding that out here beats finding it out in a Dispute window.
+		// A node that does not serve safe or finalized answers null, and spec §4's default is
+		// safe. Finding that out here beats finding it out in a Dispute window — but only a
+		// fork can answer it, because what anvil serves on its own says nothing about 4663.
+		if !w.forked {
+			t.Skip("a bare node's finality tags are anvil's, not chain 4663's")
+		}
+
 		var previous uint64
 		for _, level := range []Finality{Finalized, Safe, Latest} {
 			tip, err := reader.Head(ctx, level)
@@ -119,16 +124,16 @@ func TestAnvil(t *testing.T) {
 		// Carol's append landed at minute 30 of Epoch B. Spec §5 puts her outside Epoch A
 		// entirely and inside the whole of Epoch B — not from her block onward.
 		earlier := ExcludedAsOf(w.epochA, exclusions)
-		if earlier.Contains(w.carol) {
+		if slices.Contains(earlier, w.carol) {
 			t.Errorf("epoch %d's set contains an address appended %d epochs later",
 				w.epochA, w.epochB-w.epochA)
 		}
-		if !earlier.Contains(w.dead) || !earlier.Contains(w.excludedBase) {
+		if !slices.Contains(earlier, w.dead) || !slices.Contains(earlier, w.excludedBase) {
 			t.Errorf("epoch %d's set is missing a base entry: %v", w.epochA, earlier)
 		}
 
 		later := ExcludedAsOf(w.epochB, exclusions)
-		if !later.Contains(w.carol) {
+		if !slices.Contains(later, w.carol) {
 			t.Errorf("epoch %d's set does not contain the address appended inside it: %v", w.epochB, later)
 		}
 		if !slices.IsSortedFunc(later, compareAddresses) {

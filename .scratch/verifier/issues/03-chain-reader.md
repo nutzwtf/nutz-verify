@@ -50,16 +50,20 @@ reports an Epoch with no Root.
   about, and everything downstream is a question about a fixed block. Every `eth_call` therefore
   takes a block, with no "latest" form — a closed Epoch's `claimed[]` still moves.
 - **An endpoint that errors fails the whole read**, rather than being dropped in favour of the ones
-  that answered. A quorum of the reachable would weaken the cross-check exactly when an endpoint is
-  unavailable, which is the moment ADR-0002 is worried about. A user who wants one endpoint's
-  answer passes one endpoint.
+  that answered. Settling for whichever endpoints happened to reply would weaken the cross-check
+  exactly when an endpoint is unavailable, which is the moment ADR-0002 is worried about. A user
+  who wants one endpoint's answer passes one endpoint.
 - **Endpoints are named by position and host, never by URL.** A provider URL's path is routinely an
   API key, and these strings go into run headers, JSON reports and pasted issues. Ticket 05 should
   use `Reader.Endpoints()` for the header rather than the raw `--rpc` values.
-- **`internal/chain` imports `internal/twab` for the Epoch window only.** The alternative was a
-  second `3600` and a second statement of "Epoch e is [3600e, 3600(e+1))", which is exactly the
-  drift `CONTEXT.md` exists to prevent. The direction is safe: `twab` still imports nothing but the
-  standard library, so ticket 02's "no chain types in the rules engine" holds.
+- **The Excluded-set rule lives in `internal/twab`, and `internal/chain` calls it.** Spec §5's
+  whole-Epoch rule is one of the resolutions ADR-0003 makes normative, so it belongs with the
+  rules the Cases pin. `twab.ExcludedAsOf` is now exported and returns the set ascending and
+  de-duplicated — ordering is load-bearing because engineering spec §4.5 hashes it with
+  `abi.encodePacked` — and `chain.ExcludedAsOf` adds only the type conversion at the seam, the way
+  `internal/alloc` converts to `merkle.Address`. `chain` also takes `twab.WindowOf` rather than
+  restating `3600`. The direction is safe: `twab` still imports nothing but the standard library,
+  so ticket 02's "no chain types in the rules engine" holds.
 - **`EndBlock` is here, though the ticket did not list it.** Spec §5's window resolution has a half
   no hermetic Case can express — "the end block is the last block with `timestamp < 3600(e+1)`" —
   and `testdata/cases/README.md` names `internal/chain` as its owner. Binary search over
@@ -70,6 +74,43 @@ reports an Epoch with no Root.
   return is not an empty Ledger; a dirty address word is not an address; a log whose shape does not
   match its signature is a different event. Each of these would otherwise produce a confident wrong
   answer rather than the exit 2 the caller is owed, and each has a named test saying which.
+
+### Fixed in review
+
+Both review axes independently flagged the same thing, which is usually the sign it is real.
+
+- **The Excluded-set rule was implemented twice** — `chain.ExcludedAsOf` alongside the pre-existing
+  `twab.excludedAsOf`, with the same predicate and the doc comment copied verbatim. The Recompute
+  runs twab's copy and only the §4.5 hash ran chain's, so a rule change landing as a Case would
+  have fixed one and silently left the other wrong: exactly the divergence ADR-0003's Cases exist
+  to catch, manufactured internally. The rule is now twab's alone. Noted while doing it: the
+  original commit imported `twab.WindowOf` on the argument that a second `3600` would be drift, and
+  then reimplemented the rule around it.
+- **The harness could be skipped into irrelevance.** Every precondition failure was `t.Skipf`, so a
+  CI run with no foundry installed was green having exercised no decoder against a node — ADR-0004's
+  bargain quietly not being kept. `NUTZ_VERIFY_REQUIRE_ANVIL` now turns each of those into a
+  failure, including a missing fork URL. CI sets it; a developer without foundry still gets a skip.
+- **"Every finality tag is served" proved nothing on a bare node**, which was the default run. It
+  now skips unless the node is actually a fork of 4663, so a green run never implies that 4663
+  serves `finalized`.
+- **`Head` set the horizon from the slowest endpoint silently.** Taking the lowest tip is right, but
+  one endpoint stuck a long way back made a recent Epoch read as not yet closed for no visible
+  reason. `Tip.Lag` now carries the distance for ticket 05's header to print.
+- **`ExcludedSet.Contains` had no consumer** outside its own tests. Removed.
+- A `Site` type now carries `BlockNumber`, `BlockHash`, `LogIndex` and `Timestamp`, embedded in all
+  three event types — the four travelled together everywhere, and naming them collapsed the three
+  copies of the decode-and-timestamp tail into one helper. It is also the shape of ticket 04's
+  Cache record. Field access is unchanged for callers.
+- `eachEndpoint` and `inParallel` shared a cancel-and-remember-the-first-error skeleton, now a
+  `firstFailure` both use.
+- Two avoided glossary terms: "quorum" (`CONTEXT.md` **Cross-check**) and "fixtures" for what are
+  log builders (`CONTEXT.md` **Case**).
+
+**Declined, with the reason.** All ten test files are `package chain` where every other package in
+the repo tests externally. Eight of them genuinely need unexported access — this package's surface
+is mostly unexported decoders, unlike `twab`, `alloc` and `merkle`, whose rules are all exported —
+and the other two share their helpers. Splitting a file across the package boundary to match the
+pattern would duplicate helpers to buy nothing.
 
 ### Not done as written
 
@@ -91,8 +132,10 @@ reports an Epoch with no Root.
 - **Nothing here finds the token's creation block or the Distributor's deploy block**, which every
   log query needs as its lower bound. Ticket 05 pins them as constants or flags.
 - Two defensive branches in `endpoint.call` are unreachable and so uncovered (marshalling a struct
-  we built; building a request from a URL `url.Parse` already accepted). Coverage is otherwise 100%
-  of statements, 99.6% overall.
+  we built; building a request from a URL `url.Parse` already accepted). Every other function in
+  the package is at 100% of statements, 99.6% for the package and 99.7% across `internal/`.
+- **CI does not exist yet and must set `NUTZ_VERIFY_REQUIRE_ANVIL`**, or the harness it was built
+  for will skip there and ADR-0004's bargain goes unenforced.
 - Carried over and still open: no `LICENSE` at the repo root though spec §3 says MIT; `go.mod` says
   `go 1.24.0` rather than spec §3's conservative directive; nothing exports the fixture set to the
   Solidity and TypeScript implementations ADR-0003 names.

@@ -238,7 +238,7 @@ func (n *fakeNode) seenRanges() []string {
 	return append([]string(nil), n.ranges...)
 }
 
-// ---------------------------------------------------------------- log fixtures
+// ----------------------------------------------------------------- log builders
 
 func (n *fakeNode) addTransfer(block, index uint64, token Address, from, to Address, value int64) {
 	n.logs = append(n.logs, wireLog{

@@ -70,7 +70,7 @@ type Holder struct {
 // incomplete, and the Verifier must not answer confidently from it.
 func Replay(epochID uint64, transfers []Transfer, exclusions []Exclusion) ([]Holder, error) {
 	window := WindowOf(epochID)
-	excluded := excludedAsOf(window, exclusions)
+	excluded := ExcludedAsOf(epochID, exclusions)
 
 	// Ascending by timestamp. Order within a block is immaterial — balance deltas commute,
 	// and a sub-interval of zero length accrues nothing — but the walk has to be ordered
@@ -107,21 +107,39 @@ func Replay(epochID uint64, transfers []Transfer, exclusions []Exclusion) ([]Hol
 	return replay.holders(excluded), nil
 }
 
-// excludedAsOf is the Excluded set of the Epoch: every account whose ExcludedAppended log
-// landed before the Epoch closed.
+// ExcludedAsOf is the Excluded set of Epoch epochID: every account whose ExcludedAppended log
+// landed in a block before the Epoch closed.
 //
-// Spec §5: an entry applies to **the whole Epoch containing its block**, not from its
-// block onward, so an append at minute 30 zeroes the address for the entire hour. The set
-// is final when the Epoch ends, like the TWAB.
-func excludedAsOf(window Window, exclusions []Exclusion) map[Address]bool {
-	excluded := make(map[Address]bool, len(exclusions))
+// Spec §5: an entry applies to **the whole Epoch containing its block**, not from its block
+// onward, so an append at minute 30 zeroes the address for the entire hour. The set is final
+// when the Epoch ends, like the TWAB.
+//
+// Ascending by address and de-duplicated. That is not presentation: engineering spec §4.5
+// hashes the set with abi.encodePacked, which is order-sensitive, so "the set" has to mean
+// one byte string and not a bag. internal/chain computes that hash over exactly this order —
+// the rule lives here, with the other rules the Cases pin (ADR-0003), and is not restated
+// there.
+//
+// exclusions is the whole ExcludedAppended stream and may run past this Epoch; it is not
+// modified.
+func ExcludedAsOf(epochID uint64, exclusions []Exclusion) []Address {
+	window := WindowOf(epochID)
+
+	seen := make(map[Address]bool, len(exclusions))
+	set := make([]Address, 0, len(exclusions))
+
 	for _, e := range exclusions {
-		if e.Timestamp < window.End {
-			excluded[e.Account] = true
+		if e.Timestamp >= window.End || seen[e.Account] {
+			continue
 		}
+
+		seen[e.Account] = true
+		set = append(set, e.Account)
 	}
 
-	return excluded
+	slices.SortFunc(set, func(a, b Address) int { return bytes.Compare(a[:], b[:]) })
+
+	return set
 }
 
 // standing is one address's running balance and the integral accrued so far.
@@ -223,12 +241,12 @@ func (s *standing) accrueTo(ts int64) {
 }
 
 // holders closes every open sub-interval at the Epoch boundary and divides once.
-func (r *replayState) holders(excluded map[Address]bool) []Holder {
+func (r *replayState) holders(excluded []Address) []Holder {
 	out := make([]Holder, 0, len(r.balances))
 	divisor := big.NewInt(EpochSeconds)
 
 	for account, s := range r.balances {
-		if excluded[account] {
+		if _, found := slices.BinarySearchFunc(excluded, account, compareAddresses); found {
 			continue
 		}
 
@@ -259,4 +277,8 @@ func (r *replayState) holders(excluded map[Address]bool) []Holder {
 	})
 
 	return out
+}
+
+func compareAddresses(a, b Address) int {
+	return bytes.Compare(a[:], b[:])
 }

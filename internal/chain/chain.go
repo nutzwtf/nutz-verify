@@ -69,43 +69,45 @@ type Block struct {
 	Timestamp  int64
 }
 
-// Transfer is one NUTZ Transfer(from, to, value) log.
+// Site is where a log sits on chain: which block, where in that block, and when the block
+// was. Every event below embeds one, so a caller reads t.BlockNumber as before.
 //
-// Timestamp is the containing block's, filled in by the Reader after the logs are decoded:
-// a log carries no time of its own, and the rules weigh Holders by seconds.
-type Transfer struct {
+// Timestamp is the odd one out: it is not in the log. A log carries no time of its own and
+// the rules weigh Holders by seconds, so the Reader fills it in from the block header once
+// the logs are decoded. Keeping the four together is also what lets one helper stamp all
+// three event types, and it is the shape ticket 04's Cache record has.
+type Site struct {
 	BlockNumber uint64
 	BlockHash   Hash
 	LogIndex    uint64
 	Timestamp   int64
-	From        Address
-	To          Address
-	Value       *big.Int
+}
+
+// Transfer is one NUTZ Transfer(from, to, value) log.
+type Transfer struct {
+	Site
+	From  Address
+	To    Address
+	Value *big.Int
 }
 
 // Exclusion is one ExcludedAppended(account) log: an address whose NUTZ balance counts as
 // zero for every rule, from the Epoch containing this block onward.
 type Exclusion struct {
-	BlockNumber uint64
-	BlockHash   Hash
-	LogIndex    uint64
-	Timestamp   int64
-	Account     Address
+	Site
+	Account Address
 }
 
 // RootPosted is one RootPosted(kind, id, root, totals, carryIn) log. It is the only public
 // source of carryIn — ledger() reports funded, totals and the Root, but the Carry a Root was
 // computed against is not stored per period, so Assertion 4 of ADR-0002 reads it from here.
 type RootPosted struct {
-	BlockNumber uint64
-	BlockHash   Hash
-	LogIndex    uint64
-	Timestamp   int64
-	Kind        Kind
-	ID          uint64
-	Root        Hash
-	Totals      Amounts
-	CarryIn     Amounts
+	Site
+	Kind    Kind
+	ID      uint64
+	Root    Hash
+	Totals  Amounts
+	CarryIn Amounts
 }
 
 // Ledger is the Distributor's book for one Epoch or Draw, as ledger(kind, id) returns it.

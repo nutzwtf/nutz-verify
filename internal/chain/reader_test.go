@@ -169,8 +169,8 @@ func TestHead_AnUnsupportedTagIsNotBlockZero(t *testing.T) {
 func TestReads_FailWhenAnyEndpointFails(t *testing.T) {
 	t.Parallel()
 
-	// Not a quorum of the reachable: the cross-check would then weaken exactly when an
-	// endpoint is unavailable, which is the moment ADR-0002 is worried about.
+	// Not whichever endpoints happened to reply: the cross-check would then weaken exactly
+	// when an endpoint is unavailable, which is the moment ADR-0002 is worried about.
 	a, b := newFakeNode(100, 12), newFakeNode(100, 12)
 	b.failWith["eth_getBlockByNumber"] = "rate limited"
 
@@ -593,5 +593,41 @@ func TestReads_HonourACancelledContext(t *testing.T) {
 
 	if _, err := readerOver(t, newFakeNode(20, 15)).BlockByNumber(ctx, 1); err == nil {
 		t.Error("BlockByNumber = nil error, want the cancellation to surface")
+	}
+}
+
+func TestHead_ReportsHowFarTheSlowestEndpointIsBehind(t *testing.T) {
+	t.Parallel()
+
+	// Taking the lowest tip is right — it asks only for blocks every endpoint has — but it
+	// lets one endpoint stuck a long way back set the horizon for the whole run, and a recent
+	// Epoch then reads as not yet closed for no visible reason. Ticket 05's header prints this.
+	a, b := newFakeNode(100, 12), newFakeNode(100, 12)
+	a.tips[Safe], b.tips[Safe] = 90, 47
+
+	tip, err := readerOver(t, a, b).Head(t.Context(), Safe)
+	if err != nil {
+		t.Fatalf("Head = %v", err)
+	}
+	if tip.Block.Number != 47 {
+		t.Errorf("head = %d, want the lower tip 47", tip.Block.Number)
+	}
+	if tip.Lag != 43 {
+		t.Errorf("Lag = %d, want 43", tip.Lag)
+	}
+}
+
+func TestHead_OneEndpointLagsBehindNobody(t *testing.T) {
+	t.Parallel()
+
+	node := newFakeNode(100, 12)
+	node.tips[Safe] = 90
+
+	tip, err := readerOver(t, node).Head(t.Context(), Safe)
+	if err != nil {
+		t.Fatalf("Head = %v", err)
+	}
+	if tip.Lag != 0 {
+		t.Errorf("Lag = %d with a single endpoint, want 0", tip.Lag)
 	}
 }

@@ -26,8 +26,8 @@ func TestExcludedAsOf(t *testing.T) {
 		{
 			name: "an entry from an earlier Epoch still counts",
 			exclusions: []Exclusion{
-				{Timestamp: 0, Account: alice},
-				{Timestamp: epochOpen - 1, Account: bob},
+				excludedAt(0, alice),
+				excludedAt(epochOpen-1, bob),
 			},
 			want: []Address{alice, bob},
 		},
@@ -35,33 +35,33 @@ func TestExcludedAsOf(t *testing.T) {
 			// Spec §5: an entry applies to the whole Epoch containing its block, not from
 			// its block onward, so an append at minute 30 zeroes the address for the hour.
 			name:       "an entry landing mid-Epoch covers the whole Epoch",
-			exclusions: []Exclusion{{Timestamp: epochOpen + 1800, Account: alice}},
+			exclusions: []Exclusion{excludedAt(epochOpen+1800, alice)},
 			want:       []Address{alice},
 		},
 		{
 			name:       "an entry in the last second of the Epoch still covers it",
-			exclusions: []Exclusion{{Timestamp: epochShut - 1, Account: alice}},
+			exclusions: []Exclusion{excludedAt(epochShut-1, alice)},
 			want:       []Address{alice},
 		},
 		{
 			// The set is final when the Epoch ends, like the TWAB. The closing instant
 			// belongs to the next Epoch, so an entry there is that Epoch's business.
 			name:       "an entry at the closing instant does not",
-			exclusions: []Exclusion{{Timestamp: epochShut, Account: alice}},
+			exclusions: []Exclusion{excludedAt(epochShut, alice)},
 			want:       nil,
 		},
 		{
 			name:       "an entry from a later Epoch does not reach back",
-			exclusions: []Exclusion{{Timestamp: epochShut + 3600, Account: alice}},
+			exclusions: []Exclusion{excludedAt(epochShut+3600, alice)},
 			want:       nil,
 		},
 		{
 			name: "the set is ascending and de-duplicated whatever order the logs arrive in",
 			exclusions: []Exclusion{
-				{Timestamp: 40, Account: carol},
-				{Timestamp: 10, Account: bob},
-				{Timestamp: 20, Account: alice},
-				{Timestamp: 30, Account: bob},
+				excludedAt(40, carol),
+				excludedAt(10, bob),
+				excludedAt(20, alice),
+				excludedAt(30, bob),
 			},
 			want: []Address{alice, bob, carol},
 		},
@@ -82,20 +82,6 @@ func TestExcludedAsOf(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestExcludedSet_Contains(t *testing.T) {
-	t.Parallel()
-
-	alice, bob := repeatAddr(0xa1), repeatAddr(0xb2)
-	set := ExcludedAsOf(epoch, []Exclusion{{Timestamp: 1, Account: alice}})
-
-	if !set.Contains(alice) {
-		t.Error("Contains(alice) = false")
-	}
-	if set.Contains(bob) {
-		t.Error("Contains(bob) = true")
 	}
 }
 
@@ -161,14 +147,20 @@ func TestExcludedSet_HashDependsOnOrder(t *testing.T) {
 	}
 }
 
+// excludedAt is one ExcludedAppended log at a timestamp. Only those two fields decide the
+// set; the rest of a Site says where the log sat, which no rule looks at.
+func excludedAt(timestamp int64, account Address) Exclusion {
+	return Exclusion{Site: Site{Timestamp: timestamp}, Account: account}
+}
+
 func TestExcludedAsOf_KeepsTheCallerSlice(t *testing.T) {
 	t.Parallel()
 
 	// The caller hands over the whole ExcludedAppended stream and reuses it for the next
 	// Epoch, so reconstruction must not sort or otherwise disturb it.
 	exclusions := []Exclusion{
-		{Timestamp: 30, Account: repeatAddr(0xc3)},
-		{Timestamp: 10, Account: repeatAddr(0xa1)},
+		excludedAt(30, repeatAddr(0xc3)),
+		excludedAt(10, repeatAddr(0xa1)),
 	}
 
 	ExcludedAsOf(epoch, exclusions)

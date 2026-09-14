@@ -3,7 +3,8 @@
 Status: needs-info
 Type: task
 Spec: ../spec.md §10; ticket 03
-Blocked by: `nutz-contracts` filling in `script/config/robinhood.json`
+Blocked by: —
+External blocker: `nutz-contracts` must fill in `script/config/robinhood.json`
 
 Ticket 03 asked for the harness to run `nutz-contracts/script/Deploy.s.sol`. It does not, and today
 it cannot: `run()` hardcodes `script/config/robinhood.json`, whose `signers` and `keeper` are all
