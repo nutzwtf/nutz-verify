@@ -9,18 +9,27 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/nutzwtf/nutz-verify/internal/twab"
 )
 
-// MaxLogRange is the widest block range one eth_getLogs may cover.
+// MaxLogRange is the widest block range one eth_getLogs asks for. Pages narrow below it when
+// an endpoint says the answer would be too big; they never go above it.
 //
-// 2,000 is the public-RPC cap of engineering spec §4.1, not a tuning parameter: a wider
-// range is rejected by the endpoints a hostile stranger is most likely to be using, and the
-// Verifier existing for that stranger is the whole point. An archive endpoint that would
-// allow more gains only round trips.
+// Engineering spec §4.1 calls 2,000 blocks "the public-RPC cap". Measured against chain
+// 4663's public endpoint on 2026-09-14, that is not what the limit is: a range of a million
+// blocks is accepted, and what the endpoint refuses is **10,000 results**
+// ("logs matched by query exceeds limit of 10000"). The distinction matters because a range
+// cap is a constant and a result cap is a property of how busy the token is — USDG runs at
+// about 4.9 Transfer logs per block there, so 2,000 blocks is ~9,750 logs and sits just under
+// the cliff. A fixed page of 2,000 would work in testing and fail intermittently in
+// production, on the endpoint a hostile stranger is most likely to be using.
+//
+// So 2,000 is a starting point rather than a rule, and narrowing is what actually keeps
+// queries inside a cap nobody publishes.
 const MaxLogRange = 2000
 
 // defaultConcurrency is how many block headers are fetched at once.
@@ -473,13 +482,15 @@ func (r *Reader) logs(ctx context.Context, address Address, topic0 Hash, from, t
 		return nil, fmt.Errorf("chain: block range %d..%d runs backwards", from, to)
 	}
 
+	span := uint64(MaxLogRange)
+
 	var out []eventLog
-	for start := from; ; start += MaxLogRange {
-		// Measured as a distance from start rather than as start + MaxLogRange, which is the
+	for start := from; ; {
+		// Measured as a distance from start rather than as start + span, which is the
 		// addition that wraps once a caller asks about the top of the uint64 range.
 		end := to
-		if to-start >= MaxLogRange {
-			end = start + MaxLogRange - 1
+		if to-start >= span {
+			end = start + span - 1
 		}
 
 		page, err := crossCheck(ctx, r, fmt.Sprintf("eth_getLogs %d..%d", start, end),
@@ -488,19 +499,81 @@ func (r *Reader) logs(ctx context.Context, address Address, topic0 Hash, from, t
 			},
 			canonicalLogs)
 		if err != nil {
+			if span > 1 && tooBig(err) {
+				span /= 2
+
+				continue
+			}
+
 			return nil, err
 		}
 
 		out = append(out, page...)
 
-		// Tested here rather than in the loop condition for the same reason: the increment
-		// only happens when another whole page is left, so start never runs past to.
+		// Tested here rather than in the loop condition: the step only happens when another
+		// page is left, so start never runs past to and never wraps.
 		if end == to {
 			break
 		}
+
+		// The narrowed span is kept for the rest of the range rather than grown back. Density
+		// is locally similar, so re-widening after every success would refuse, halve and retry
+		// about every other page — paying a failed request to rediscover a limit already
+		// found. The cost of keeping it is more pages over a sparse stretch; the cost of
+		// growing it is a failed request forever.
+		start = end + 1
 	}
 
 	return out, nil
+}
+
+// tooBigPhrases are how endpoints say a log query would return too much. Lowercased
+// fragments, because no two providers phrase it the same way and none of them use a
+// distinguishable error code:
+//
+//	chain 4663 public   logs matched by query exceeds limit of 10000
+//	geth / Infura       query returned more than 10000 results
+//	geth                query timeout exceeded
+//	Alchemy             Log response size exceeded
+//	various             block range is too wide / range too large
+var tooBigPhrases = []string{
+	"exceeds limit",
+	"limit exceeded",
+	"more than",
+	"too many",
+	"size exceeded",
+	"timeout exceeded",
+	"too wide",
+	"too large",
+	"range is too",
+}
+
+// tooBig reports whether an endpoint refused a log query for being too big, so the range
+// should be halved and retried.
+//
+// A heuristic over error strings, and safe in both directions by construction: matching
+// something that was not a size complaint wastes at most log2(MaxLogRange) requests before
+// the error is returned anyway, and failing to match one returns the error unretried. Neither
+// can produce a wrong answer, which is the only property that matters here — a silently short
+// page would change every Holder's TWAB.
+//
+// Only a JSON-RPC error object narrows. A refused connection or a timeout is not the endpoint
+// telling us the query was too big, and retrying it in halves would turn one outage into
+// eleven.
+func tooBig(err error) bool {
+	var rpcErr *RPCError
+	if !errors.As(err, &rpcErr) {
+		return false
+	}
+
+	message := strings.ToLower(rpcErr.Message)
+	for _, phrase := range tooBigPhrases {
+		if strings.Contains(message, phrase) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // callAt is a cross-checked eth_call at a pinned block. The returned bytes are compared

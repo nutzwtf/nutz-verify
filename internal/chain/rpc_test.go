@@ -1,11 +1,14 @@
 package chain
 
 import (
+	"context"
+	"errors"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRoots_DecodeFromTheLogStream(t *testing.T) {
@@ -482,5 +485,176 @@ func TestNewEndpoint_RefusesAURLWithNoHost(t *testing.T) {
 
 	if _, err := newEndpoint("http:///rpc", 1, nil); err == nil {
 		t.Error("newEndpoint = nil error, want a refusal")
+	}
+}
+
+func TestCall_RidesOutARateLimit(t *testing.T) {
+	t.Parallel()
+
+	// A public endpoint rate-limits, and the Verifier exists for the stranger using one. A 429
+	// is not "could not check" — the provider is saying exactly how to succeed — so turning
+	// one into INDETERMINATE would fail a Recompute for the reason it is likeliest to fail.
+	node := newFakeNode(20, 15)
+	node.refuseFirst, node.refuseWith = 3, http.StatusTooManyRequests
+
+	got, err := readerOver(t, node).BlockByNumber(t.Context(), 5)
+	if err != nil {
+		t.Fatalf("BlockByNumber = %v", err)
+	}
+	if got.Number != 5 {
+		t.Errorf("block = %d, want 5", got.Number)
+	}
+}
+
+func TestCall_RidesOutAGatewayError(t *testing.T) {
+	t.Parallel()
+
+	node := newFakeNode(20, 15)
+	node.refuseFirst, node.refuseWith = 2, http.StatusBadGateway
+
+	if _, err := readerOver(t, node).BlockByNumber(t.Context(), 5); err != nil {
+		t.Errorf("BlockByNumber = %v", err)
+	}
+}
+
+func TestCall_GivesUpOnAnEndpointThatKeepsRefusing(t *testing.T) {
+	t.Parallel()
+
+	// Bounded: a wedged endpoint has to become INDETERMINATE inside the Dispute window rather
+	// than hang in it.
+	node := newFakeNode(20, 15)
+	node.refuseFirst, node.refuseWith = 100, http.StatusTooManyRequests
+
+	_, err := readerOver(t, node).BlockByNumber(t.Context(), 5)
+	if err == nil {
+		t.Fatal("BlockByNumber = nil error, want the refusal to surface")
+	}
+	if !strings.Contains(err.Error(), "429") {
+		t.Errorf("error loses the status: %v", err)
+	}
+
+	node.mu.Lock()
+	defer node.mu.Unlock()
+	if node.refused != maxAttempts {
+		t.Errorf("made %d attempts, want %d", node.refused, maxAttempts)
+	}
+}
+
+func TestCall_DoesNotRetryWhatWillNotImprove(t *testing.T) {
+	t.Parallel()
+
+	// A bad key and an unsupported method fail identically five times over, having cost five
+	// times as much. Only "up, but asking us to wait" is worth asking again.
+	node := newFakeNode(20, 15)
+	node.refuseFirst, node.refuseWith = 100, http.StatusForbidden
+
+	if _, err := readerOver(t, node).BlockByNumber(t.Context(), 5); err == nil {
+		t.Fatal("BlockByNumber = nil error, want a refusal")
+	}
+
+	node.mu.Lock()
+	defer node.mu.Unlock()
+	if node.refused != 1 {
+		t.Errorf("made %d attempts at a 403, want 1", node.refused)
+	}
+}
+
+func TestCall_HonoursRetryAfter(t *testing.T) {
+	t.Parallel()
+
+	// The endpoint's own instruction beats our guess at one.
+	node := newFakeNode(20, 15)
+	node.refuseFirst, node.refuseWith, node.retryAfter = 1, http.StatusTooManyRequests, "1"
+
+	start := time.Now()
+	if _, err := readerOver(t, node).BlockByNumber(t.Context(), 5); err != nil {
+		t.Fatalf("BlockByNumber = %v", err)
+	}
+
+	if waited := time.Since(start); waited < time.Second {
+		t.Errorf("waited %s, and the endpoint asked for a second", waited)
+	}
+}
+
+func TestRetryAfter_IgnoresWhatItCannotRead(t *testing.T) {
+	t.Parallel()
+
+	// An HTTP-date is not parsed: nothing observed sends one, and guessing wrong about clock
+	// skew would be worse than falling back to the backoff.
+	for _, header := range []string{"", "Wed, 21 Oct 2026 07:28:00 GMT", "soon", "-5"} {
+		resp := &http.Response{Header: http.Header{}}
+		if header != "" {
+			resp.Header.Set("Retry-After", header)
+		}
+
+		if got := retryAfter(resp); got != 0 {
+			t.Errorf("retryAfter(%q) = %s, want 0", header, got)
+		}
+	}
+
+	resp := &http.Response{Header: http.Header{}}
+	resp.Header.Set("Retry-After", "2")
+	if got := retryAfter(resp); got != 2*time.Second {
+		t.Errorf("retryAfter(2) = %s", got)
+	}
+
+	// Capped, so a provider asking for an hour does not hang a Dispute-window run.
+	resp.Header.Set("Retry-After", "3600")
+	if got := retryAfter(resp); got != retryCap {
+		t.Errorf("retryAfter(3600) = %s, want the cap %s", got, retryCap)
+	}
+}
+
+func TestBackoff_StaysInsideItsWindow(t *testing.T) {
+	t.Parallel()
+
+	for attempt := 1; attempt < maxAttempts; attempt++ {
+		for range 50 {
+			got := backoff(attempt, nil)
+			if got < retryBase || got > retryCap+retryBase {
+				t.Fatalf("backoff(%d) = %s, outside [%s, %s]", attempt, got, retryBase, retryCap+retryBase)
+			}
+		}
+	}
+}
+
+func TestCall_ACancelledContextEndsTheBackoff(t *testing.T) {
+	t.Parallel()
+
+	// The Dispute window closes whether or not the endpoint recovers. A caller giving up has
+	// to end the wait, not merely the next attempt after it.
+	node := newFakeNode(20, 15)
+	node.refuseFirst, node.refuseWith, node.retryAfter = 100, http.StatusTooManyRequests, "8"
+
+	ctx, cancel := context.WithCancel(t.Context())
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	_, err := readerOver(t, node).BlockByNumber(ctx, 5)
+	if err == nil {
+		t.Fatal("BlockByNumber = nil error, want the cancellation to surface")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error is not the cancellation: %v", err)
+	}
+	if waited := time.Since(start); waited > 2*time.Second {
+		t.Errorf("took %s to notice a cancellation during an 8s Retry-After", waited)
+	}
+}
+
+func TestRetryable_UnwrapsToTheRefusal(t *testing.T) {
+	t.Parallel()
+
+	inner := errors.New("http 429 Too Many Requests")
+	wrapped := &retryable{status: http.StatusTooManyRequests, err: inner}
+
+	if !errors.Is(wrapped, inner) {
+		t.Error("a retryable does not unwrap to the refusal it carries")
+	}
+	if wrapped.Error() != inner.Error() {
+		t.Errorf("Error() = %q, want the refusal's own text", wrapped.Error())
 	}
 }

@@ -3,6 +3,7 @@ package chain
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"slices"
 	"strings"
@@ -629,5 +630,139 @@ func TestHead_OneEndpointLagsBehindNobody(t *testing.T) {
 	}
 	if tip.Lag != 0 {
 		t.Errorf("Lag = %d with a single endpoint, want 0", tip.Lag)
+	}
+}
+
+func TestLogs_NarrowWhenTheEndpointRefusesTheSize(t *testing.T) {
+	t.Parallel()
+
+	// The limit a real public endpoint enforces is on results, not on block range, so how
+	// wide a page may be depends on how busy the token is and no constant can express it.
+	// Eight logs per block against a cap of 100 puts the ceiling at twelve blocks, so the
+	// 2,000-block opening page has to come down four times before anything is returned.
+	node := newFakeNode(600, 15)
+	node.resultCap = 100
+
+	var want int
+	for block := range uint64(500) {
+		for index := range uint64(8) {
+			node.addTransfer(block, index, nutz, alice, bob, int64(block))
+			want++
+		}
+	}
+
+	got, err := readerOver(t, node).Transfers(t.Context(), 0, 499)
+	if err != nil {
+		t.Fatalf("Transfers = %v", err)
+	}
+
+	// Every log exactly once: a narrowing that dropped or repeated a page would be invisible
+	// in the Verdict and would change every Holder's TWAB.
+	if len(got) != want {
+		t.Fatalf("got %d transfers, want %d", len(got), want)
+	}
+	for i := 1; i < len(got); i++ {
+		previous, current := got[i-1], got[i]
+		if current.BlockNumber < previous.BlockNumber ||
+			(current.BlockNumber == previous.BlockNumber && current.LogIndex <= previous.LogIndex) {
+			t.Fatalf("transfer %d at %d/%d does not follow %d/%d",
+				i, current.BlockNumber, current.LogIndex, previous.BlockNumber, previous.LogIndex)
+		}
+	}
+
+	// Narrowed once and kept, rather than grown back: re-widening would pay a refused request
+	// to rediscover the same limit about every other page.
+	for _, seen := range node.seenRanges() {
+		var from, to uint64
+		if _, err := fmt.Sscanf(seen, "%d..%d", &from, &to); err != nil {
+			t.Fatal(err)
+		}
+		if to-from+1 > MaxLogRange {
+			t.Errorf("asked for %s, which is wider than MaxLogRange", seen)
+		}
+	}
+}
+
+func TestLogs_NarrowingGivesUpAtOneBlock(t *testing.T) {
+	t.Parallel()
+
+	// A single block that still exceeds the cap cannot be split further. That is the one
+	// case narrowing cannot rescue, and it has to surface rather than loop.
+	node := newFakeNode(20, 15)
+	node.resultCap = 2
+	for index := range uint64(5) {
+		node.addTransfer(3, index, nutz, alice, bob, 1)
+	}
+
+	_, err := readerOver(t, node).Transfers(t.Context(), 0, 19)
+	if err == nil {
+		t.Fatal("Transfers = nil error, want the refusal to surface")
+	}
+	if !strings.Contains(err.Error(), "exceeds limit") {
+		t.Errorf("error loses the endpoint's reason: %v", err)
+	}
+}
+
+func TestLogs_AnUnrelatedErrorIsNotRetried(t *testing.T) {
+	t.Parallel()
+
+	// Halving is for "your query was too big". Applying it to an outage or a bad key would
+	// turn one failed request into eleven against an endpoint already in trouble.
+	node := newFakeNode(20, 15)
+	node.failWith["eth_getLogs"] = "invalid api key"
+
+	if _, err := readerOver(t, node).Transfers(t.Context(), 0, 19); err == nil {
+		t.Fatal("Transfers = nil error, want a refusal")
+	}
+
+	// Counted at the request rather than at the range: this node refuses before it ever looks
+	// at the filter, which is what an endpoint rejecting a key does too.
+	node.mu.Lock()
+	defer node.mu.Unlock()
+
+	queries := 0
+	for _, method := range node.requests {
+		if method == "eth_getLogs" {
+			queries++
+		}
+	}
+	if queries != 1 {
+		t.Errorf("made %d eth_getLogs requests for an error that is not about size, want 1", queries)
+	}
+}
+
+func TestTooBig(t *testing.T) {
+	t.Parallel()
+
+	// How the endpoints we know about phrase it. A miss here is safe — the error is returned
+	// unretried — but it costs a sync that would otherwise have completed.
+	refusals := []string{
+		"logs matched by query exceeds limit of 10000", // chain 4663 public
+		"query returned more than 10000 results",       // geth, Infura
+		"query timeout exceeded",                       // geth
+		"Log response size exceeded",                   // Alchemy
+		"block range is too wide",
+		"requested range too large",
+	}
+
+	for _, message := range refusals {
+		t.Run(message, func(t *testing.T) {
+			t.Parallel()
+
+			if !tooBig(&RPCError{Code: -32005, Message: message}) {
+				t.Errorf("tooBig(%q) = false", message)
+			}
+		})
+	}
+
+	// Not about size, and a transport failure is not the endpoint saying anything at all.
+	for _, other := range []error{
+		&RPCError{Code: -32000, Message: "invalid api key"},
+		&RPCError{Code: -32601, Message: "the method eth_getLogs does not exist"},
+		errors.New("connection refused"),
+	} {
+		if tooBig(other) {
+			t.Errorf("tooBig(%v) = true", other)
+		}
 	}
 }

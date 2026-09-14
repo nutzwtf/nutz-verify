@@ -38,6 +38,18 @@ type fakeNode struct {
 	// httpStatus, when non-zero, is returned instead of a JSON-RPC reply at all.
 	httpStatus int
 
+	// refuseFirst is how many requests answer refuseWith before the node starts behaving,
+	// which is how a rate limit that passes looks from the client side. retryAfter, when set,
+	// is sent as the Retry-After header.
+	refuseFirst int
+	refuseWith  int
+	retryAfter  string
+	refused     int
+
+	// resultCap is the real shape of a public endpoint's log limit: not a cap on how many
+	// blocks a query covers, but on how many logs it may match. Zero means unlimited.
+	resultCap int
+
 	// missing are block numbers the node answers null for, the way a node does for a block
 	// it has pruned or never had.
 	missing map[uint64]bool
@@ -103,6 +115,22 @@ func (n *fakeNode) handle(w http.ResponseWriter, r *http.Request) {
 
 	if n.httpStatus != 0 {
 		http.Error(w, "upstream is having a moment", n.httpStatus)
+
+		return
+	}
+
+	n.mu.Lock()
+	refusing := n.refused < n.refuseFirst
+	if refusing {
+		n.refused++
+	}
+	n.mu.Unlock()
+
+	if refusing {
+		if n.retryAfter != "" {
+			w.Header().Set("Retry-After", n.retryAfter)
+		}
+		http.Error(w, "slow down", n.refuseWith)
 
 		return
 	}
@@ -211,7 +239,14 @@ func (n *fakeNode) getLogs(filter map[string]any) (any, error) {
 		out = append(out, l)
 	}
 
-	return append(out, n.always...), nil
+	out = append(out, n.always...)
+
+	if n.resultCap > 0 && len(out) > n.resultCap {
+		// Phrased the way chain 4663's public endpoint phrases it, verbatim.
+		return nil, fmt.Errorf("logs matched by query exceeds limit of %d", n.resultCap)
+	}
+
+	return out, nil
 }
 
 func (n *fakeNode) reply(w http.ResponseWriter, id uint64, result any, rpcErr *RPCError) {

@@ -19,26 +19,37 @@ in fact.
 | Job | Needs | Runs |
 |---|---|---|
 | `go` | a Go toolchain | every push and PR |
-| `harness (bare node)` | foundry, a built `nutz-contracts` | every push and PR |
-| `harness (fork of 4663)` | the above plus `RPC_4663` | nightly and `workflow_dispatch` |
+| `harness (fork of 4663)` | foundry, a built `nutz-contracts` — **no secret** | every push and PR |
+| `live (real 4663, two providers)` | the public endpoint; `RPC_4663` for the cross-check | nightly and `workflow_dispatch` |
 
-The middle tier is the point. A single `NUTZ_VERIFY_REQUIRE_ANVIL` covering both the tools and the
-fork would mean the decoders could only be *required* to meet a node where the archive secret is
-available — which is nightly, and a decoder regression would then sit unnoticed for a day. So
-enforcement is split in two: `NUTZ_VERIFY_REQUIRE_ANVIL` (tools present; a bare node satisfies it,
-so it needs no secrets) and `NUTZ_VERIFY_REQUIRE_FORK` (the node must really be a fork of 4663).
-Unset, both still skip, so a contributor without foundry can run `go test ./...`.
+**The fork needs no secret**, which was not obvious until it was tried. Chain 4663's public
+endpoint (`https://rpc.mainnet.chain.robinhood.com`) needs no key, and the harness deploys its own
+contracts and reads only block *headers* from before the fork — which a full node serves without
+archive state. So the forked harness runs on every push with a URL pinned in the workflow as a
+plain value. That is the same fact ADR-0002 rests on: a hostile stranger runs the Verifier against
+that endpoint with no credential at all, and a CI that needed one would contradict the claim.
+
+Enforcement is still two variables — `NUTZ_VERIFY_REQUIRE_ANVIL` (tools present) and
+`NUTZ_VERIFY_REQUIRE_FORK` (really a fork) — because a contributor without foundry wants neither,
+and a contributor offline wants only the first. CI sets both. Unset, both skip.
 
 A bare node exercises every decoder, which is what ADR-0004 bought. What it cannot answer is
 anything about chain 4663 itself, so the subtest that asks whether `safe` and `finalized` are
 served there skips unless the node is actually a fork — on a bare node it was asserting anvil's
 tags and implying they were 4663's.
 
+The `live` tier is new and is the only test ADR-0002's cross-check has that is not one anvil
+compared with itself: it reads real USDG history through the public endpoint and a Chainstack
+archive and requires the two to agree byte for byte. It also proves the paging against the public
+endpoint's real 10,000-result cap. Nightly rather than per-push because it queries an endpoint
+someone else pays for.
+
 ## Decisions worth knowing
 
-- **The fork job has no `if: env.RPC_4663 != ''` guard**, unlike `nutz-contracts`' fork job. A
-  nightly that green-skips because a secret is missing is the same silent non-check this ticket
-  exists to remove. It is red until `RPC_4663` is configured, deliberately.
+- **`RPC_4663` is optional everywhere.** Without it the `live` job still proves the paging; with it
+  the two-provider cross-check runs too. Nothing green-skips: the live test skips only when the
+  public endpoint is throttling us, and says so, because a third party's quota is not something a
+  test can assert about.
 - **`go-version-file: go.mod`**, not the newest release. Spec §3 wants a conservative directive so a
   distro toolchain can build the Verifier; running CI on anything newer would leave that untested.
 - **The dependency tree is a gate, not a convention.** ADR-0004 calls `go.sum` a user-facing
@@ -62,5 +73,7 @@ minutes. Four consecutive forked runs at ~19 s each.
 - `CONTRACTS_TOKEN` is referenced with a `github.token` fallback, so this works whether or not
   `nutz-contracts` is private. If it is private, add the secret; if it is public, delete the `token:`
   lines. Unverified from this machine.
+- `.env.example` documents every variable above, and opens by saying the Verifier itself needs none
+  of them.
 - Nothing publishes coverage. `nutz-contracts` uploads an lcov artifact; worth mirroring if anyone
   wants the trend.

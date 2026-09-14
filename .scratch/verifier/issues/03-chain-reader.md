@@ -112,6 +112,31 @@ is mostly unexported decoders, unlike `twab`, `alloc` and `merkle`, whose rules 
 and the other two share their helpers. Splitting a file across the package boundary to match the
 pattern would duplicate helpers to buy nothing.
 
+### Fixed against the real endpoint, after review
+
+The review round compared the package with a fake node. Pointing it at chain 4663's actual public
+endpoint found two defects the fake could not have, both in the part of the ticket that was taken
+on faith from the engineering spec. Both are recorded in ../spec.md §4 with the measurements.
+
+- **The 2,000-block cap does not exist; the limit is 10,000 results.** A million-block range is
+  accepted. A fixed 2,000-block page against USDG (4.9–5.4 logs per block) therefore straddled the
+  cap: ~9,750 logs on a quiet stretch, ~13,500 on a busy one. It passed every test and would have
+  failed intermittently in production, on the endpoint the Verifier's target user is most likely to
+  have. Paging now opens at 2,000 and halves on a refusal that names a limit; the heuristic is safe
+  in both directions because a wrong guess can only waste requests, never shorten a page.
+- **The endpoint throttles**, and a `429` mid-sync became INDETERMINATE. It is not "could not
+  check" — the provider is saying how to succeed — so `429` and `5xx` now retry five times with
+  jittered backoff, honouring `Retry-After`, and only then fail. A `403` is not retried; the one
+  observed was a short block earned by probing, and encoding one provider's quirk as "403 means
+  wait" would mask a real key failure everywhere else.
+- **Two independent providers agree.** The public endpoint and a Chainstack archive return
+  byte-identical logs over 13,715 real entries. Until this, ADR-0002's cross-check had only been
+  tested as one anvil compared with itself; a canonical comparison that could not survive two real
+  providers' formatting would have made every multi-endpoint run INDETERMINATE.
+
+Both live tests are in `live_test.go`, opt-in via `NUTZ_VERIFY_LIVE_RPC`, and run nightly (ticket
+10).
+
 ### Not done as written
 
 - **The harness does not run `script/Deploy.s.sol`.** It cannot: `run()` hardcodes
@@ -127,10 +152,10 @@ pattern would duplicate helpers to buy nothing.
 
 ### Follow-ups, not done here
 
-- **Block headers are one request per block that produced a log**, fetched over a pool of eight.
-  Whether that is fast enough for a from-scratch sync is ticket 04's load test to answer; JSON-RPC
-  batching is the obvious lever and was left out because an endpoint that does not support batching
-  would fail loudly rather than degrade.
+- **Block headers are one request per block that produced a log**, fetched over a pool of eight —
+  and at USDG's density that is one request per block, **~864,000 per day of history**. Ticket 04
+  has the numbers. JSON-RPC batching is the obvious lever and was left out because an endpoint that
+  does not support batching would fail loudly rather than degrade; expect ticket 04 to need it.
 - **Nothing here finds the token's creation block or the Distributor's deploy block**, which every
   log query needs as its lower bound. Ticket 05 pins them as constants or flags.
 - Two defensive branches in `endpoint.call` are unreachable and so uncovered (marshalling a struct

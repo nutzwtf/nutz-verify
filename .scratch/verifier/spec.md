@@ -46,6 +46,35 @@ All from RPC. Nothing we publish is an input.
 
 `--artifacts` additionally accepts a published bundle and diffs it against the Recompute. It can never influence one.
 
+### What the endpoints actually limit — measured 2026-09-14, chain 4663
+
+Engineering spec §4.1 calls 2,000 blocks "the public-RPC cap". **It is not**, and this file wins:
+measured against `https://rpc.mainnet.chain.robinhood.com`, a range of a *million* blocks is
+accepted, and what the endpoint refuses is **10,000 results** — `logs matched by query exceeds
+limit of 10000`. Patch §4.1 when this component ships.
+
+The distinction is the difference between a working Verifier and one that fails in production
+only: a range cap is a constant you can page under, while a result cap depends on how busy the
+token is. USDG runs at **4.9–5.4 `Transfer` logs per block**, so a 2,000-block page is ~9,750–13,500
+logs — straddling the cap. A fixed page would pass every test and then fail intermittently against
+the endpoint a hostile stranger is most likely to be using. `internal/chain` therefore opens at
+2,000 blocks and **halves on refusal**, which needs no constant to be right.
+
+Two further properties of that endpoint, both relevant to §9 and §10:
+
+- **It throttles.** Sustained querying earns `429`, and pushing harder earns a short `403`. Both
+  pass. The client retries `429` and `5xx` with bounded backoff, honouring `Retry-After`; anything
+  still refusing after five attempts is INDETERMINATE, because a wedged endpoint has to fail inside
+  the Dispute window rather than hang in it.
+- **The block-timestamp join is the real cost, not the logs.** A log carries no timestamp, so every
+  block that produced one needs its header. At 5.4 logs per block essentially every block qualifies,
+  and at ~100 ms blocks that is **~864,000 header requests per day of history**. Batching or the
+  Cache has to absorb that; it is ticket 04's load test to say which.
+
+Cross-checking two genuinely independent providers works: the public endpoint and a Chainstack
+archive return byte-identical logs over the same range, so the canonical comparison survives real
+differences in formatting and ordering. ADR-0002's mitigation is usable, not just stated.
+
 ## 5. Rules (engineering spec §4, ambiguities resolved)
 
 Integer arithmetic throughout. These five resolutions are the difference between two implementations that agree and two that do not; each is a named Case in `testdata/cases/`.

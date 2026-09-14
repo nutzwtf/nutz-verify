@@ -8,3 +8,6 @@
 
 # CI checks out nutz-contracts here for the anvil harness (see .github/workflows/ci.yml)
 /nutz-contracts/
+
+# Local test configuration; see .env.example. The Verifier itself needs no .env.
+/.env

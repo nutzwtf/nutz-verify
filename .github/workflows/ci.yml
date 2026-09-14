@@ -6,12 +6,22 @@ on:
   schedule:
     - cron: "0 5 * * *"          # nightly forked harness, an hour after nutz-contracts'
 
-# Three tiers, and the split between them is deliberate. `go` needs nothing but a toolchain,
-# so it runs anywhere. `harness` needs foundry and a built nutz-contracts but no secrets, so
-# it runs on every push — that is the tier that keeps ADR-0004's bargain, because a decoder
-# regression must not be able to sit unnoticed until the next nightly. `fork` needs an archive
-# endpoint, so it is nightly, and it is the only tier that can answer what chain 4663 itself
-# serves.
+# Three tiers, and the split between them is deliberate.
+#
+#   go       nothing but a toolchain, so it runs anywhere.
+#   harness  foundry and a built nutz-contracts, forking chain 4663 through its public
+#            endpoint. No secret: that endpoint needs no key, which is the same fact ADR-0002
+#            rests on — a hostile stranger downloads the binary and runs it. So the tier that
+#            keeps ADR-0004's bargain runs on every push, and a decoder regression cannot sit
+#            unnoticed until the next nightly.
+#   live     reads real 4663 history and cross-checks two independent providers, which is the
+#            only place ADR-0002's "two providers are not colluding" is actually tested. It
+#            queries someone else's public endpoint, so it is nightly rather than per-push.
+#
+# PUBLIC_4663 is the chain's own public RPC, pinned here as a plain value because it is not a
+# secret and a CI that needed one would contradict the claim the Verifier makes.
+env:
+  PUBLIC_4663: https://rpc.mainnet.chain.robinhood.com
 
 jobs:
   go:
@@ -48,7 +58,7 @@ jobs:
           git diff --exit-code go.mod go.sum
 
   harness:
-    name: harness (bare node)
+    name: harness (fork of 4663)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -67,37 +77,30 @@ jobs:
         working-directory: nutz-contracts
       - uses: actions/setup-go@v5
         with: { go-version-file: go.mod }
-      - name: every decoder against a real node
-        env:
-          NUTZ_VERIFY_REQUIRE_ANVIL: "1"
-          NUTZ_CONTRACTS: ${{ github.workspace }}/nutz-contracts
-        run: go test -count=1 -v -timeout 900s -run TestAnvil ./internal/chain/
-
-  fork:
-    name: harness (fork of 4663)
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
-        with:
-          repository: nutzwtf/nutz-contracts
-          path: nutz-contracts
-          submodules: recursive
-          token: ${{ secrets.CONTRACTS_TOKEN || github.token }}
-      - uses: foundry-rs/foundry-toolchain@v1
-        with: { version: v1.8.1 }
-      - run: forge build
-        working-directory: nutz-contracts
-      - uses: actions/setup-go@v5
-        with: { go-version-file: go.mod }
-      # No `if: env.RPC_4663 != ''` guard, deliberately: this job exists to answer what chain
-      # 4663 serves, and a nightly that green-skips because a secret is missing is the same
-      # silent non-check NUTZ_VERIFY_REQUIRE_FORK was added to stop. Red until RPC_4663 is set.
+      # Both REQUIRE_* set: no secret is needed to fork 4663, so there is no reason to let
+      # this degrade to a bare node or to skip.
       - name: every decoder against a fork of 4663
         env:
           NUTZ_VERIFY_REQUIRE_ANVIL: "1"
           NUTZ_VERIFY_REQUIRE_FORK: "1"
+          NUTZ_VERIFY_FORK_RPC: ${{ env.PUBLIC_4663 }}
           NUTZ_CONTRACTS: ${{ github.workspace }}/nutz-contracts
-          RPC_4663: ${{ secrets.RPC_4663 }}
         run: go test -count=1 -v -timeout 900s -run TestAnvil ./internal/chain/
+
+  live:
+    name: live (real 4663, two providers)
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      # RPC_4663 is a Chainstack archive endpoint. Without it this still exercises the paging
+      # against the public endpoint's real 10,000-result cap; with it, the two are compared
+      # byte for byte, which is the only test ADR-0002's cross-check has that is not one node
+      # compared with itself.
+      - name: paging and cross-check against real history
+        env:
+          NUTZ_VERIFY_LIVE_RPC: ${{ env.PUBLIC_4663 }}
+          NUTZ_VERIFY_LIVE_RPC_2: ${{ secrets.RPC_4663 }}
+        run: go test -count=1 -v -timeout 600s -run TestLive ./internal/chain/

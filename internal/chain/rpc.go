@@ -5,13 +5,18 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
+	"strings"
 	"sync/atomic"
+	"time"
 )
 
 // bodyLimit caps how much of a response we will read. A verifier that streams an unbounded
@@ -82,7 +87,24 @@ type rpcResponse struct {
 	Error  *RPCError       `json:"error"`
 }
 
-// call makes one JSON-RPC request and returns the raw result.
+// Retry bounds for a provider that is up but asking us to slow down.
+//
+// A public endpoint rate-limits, and the Verifier exists for the stranger using one: chain
+// 4663's answers HTTP 429 partway through a sync of a busy token. A 429 is not "could not
+// check" — the provider is telling us exactly how to succeed — and turning one into
+// INDETERMINATE would mean a Recompute failing for the reason it was most likely to fail.
+//
+// Five attempts over roughly four seconds. Long enough to ride out a token-bucket refill,
+// short enough that a genuinely wedged endpoint still becomes INDETERMINATE inside a
+// 30-minute Dispute window rather than hanging in it.
+const (
+	maxAttempts = 5
+	retryBase   = 250 * time.Millisecond
+	retryCap    = 8 * time.Second
+)
+
+// call makes one JSON-RPC request and returns the raw result, retrying while the endpoint is
+// asking us to wait.
 //
 // The result comes back undecoded so the caller can tell JSON null from a zero value. A node
 // answers null for a block it does not have — an unsupported finality tag, a number past its
@@ -98,6 +120,44 @@ func (e *endpoint) call(ctx context.Context, method string, params ...any) (json
 		return nil, fmt.Errorf("%s: encoding the request: %w", method, err)
 	}
 
+	var lastErr error
+	for attempt := range maxAttempts {
+		if attempt > 0 {
+			if err := wait(ctx, backoff(attempt, lastErr)); err != nil {
+				return nil, fmt.Errorf("%s: %w", method, err)
+			}
+		}
+
+		result, err := e.attempt(ctx, method, body)
+		if err == nil {
+			return result, nil
+		}
+
+		lastErr = err
+
+		var retry *retryable
+		if !errors.As(err, &retry) {
+			return nil, err
+		}
+	}
+
+	return nil, fmt.Errorf("%s: gave up after %d attempts: %w", method, maxAttempts, lastErr)
+}
+
+// retryable is an endpoint that is up and refusing for a reason that may pass: a rate limit,
+// or a gateway that is briefly unwell. It is distinguished from every other failure because
+// those do not improve by being asked again — a bad key and an unsupported method would just
+// cost five times as much before failing identically.
+type retryable struct {
+	status int
+	after  time.Duration // the endpoint's own Retry-After, when it sent one
+	err    error
+}
+
+func (r *retryable) Error() string { return r.err.Error() }
+func (r *retryable) Unwrap() error { return r.err }
+
+func (e *endpoint) attempt(ctx context.Context, method string, body []byte) (json.RawMessage, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", method, err)
@@ -116,8 +176,13 @@ func (e *endpoint) call(ctx context.Context, method string, params ...any) (json
 		// A rate limit and a gateway error both arrive as HTML often enough that the status
 		// line alone leaves a user guessing which endpoint to blame.
 		snippet, _ := io.ReadAll(io.LimitReader(limited, errorBodyLimit))
+		failure := fmt.Errorf("%s: http %s: %s", method, resp.Status, bytes.TrimSpace(snippet))
 
-		return nil, fmt.Errorf("%s: http %s: %s", method, resp.Status, bytes.TrimSpace(snippet))
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+			return nil, &retryable{status: resp.StatusCode, after: retryAfter(resp), err: failure}
+		}
+
+		return nil, failure
 	}
 
 	var decoded rpcResponse
@@ -132,6 +197,44 @@ func (e *endpoint) call(ctx context.Context, method string, params ...any) (json
 	}
 
 	return decoded.Result, nil
+}
+
+// retryAfter is the endpoint's own instruction, in the delta-seconds form providers actually
+// send. An HTTP-date is ignored rather than parsed: nothing observed sends one, and guessing
+// wrong about a clock skew would be worse than falling back to the backoff.
+func retryAfter(resp *http.Response) time.Duration {
+	seconds, err := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After")))
+	if err != nil || seconds < 0 {
+		return 0
+	}
+
+	return min(time.Duration(seconds)*time.Second, retryCap)
+}
+
+// backoff is how long to wait before attempt n. The endpoint's own Retry-After wins; failing
+// that, exponential with full jitter, which spreads the eight header workers out instead of
+// having them all come back at the same instant and rebuild the queue they just drained.
+func backoff(attempt int, last error) time.Duration {
+	var retry *retryable
+	if errors.As(last, &retry) && retry.after > 0 {
+		return retry.after
+	}
+
+	window := min(retryBase<<(attempt-1), retryCap)
+
+	return time.Duration(rand.Int64N(int64(window)) + int64(retryBase))
+}
+
+func wait(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func isNull(raw json.RawMessage) bool {
