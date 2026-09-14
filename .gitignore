@@ -1,0 +1,7 @@
+# Machine-local agent skill installs
+/.agents/
+/.claude/
+
+# Build output
+/nutz-verify
+/dist/

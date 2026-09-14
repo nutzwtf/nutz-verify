@@ -1,0 +1,25 @@
+{
+  "name": "single-claim",
+  "note": "One leaf: the tree is the leaf, the root is the leaf, and the proof is empty.",
+  "encoding": [
+    "uint256",
+    "address",
+    "uint256[5]"
+  ],
+  "id": "1",
+  "root": "0xbf8516045da297dafcd752f35d4840ea2a69b8b31329bd2cda547e9466b021d3",
+  "claims": [
+    {
+      "account": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "amounts": [
+        "1000000000000000000",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "proof": [],
+      "leaf": "0xbf8516045da297dafcd752f35d4840ea2a69b8b31329bd2cda547e9466b021d3"
+    }
+  ]
+}

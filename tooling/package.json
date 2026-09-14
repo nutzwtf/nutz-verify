@@ -1,0 +1,13 @@
+{
+  "name": "nutz-verify-tooling",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Generates testdata/merkle/*.json with @openzeppelin/merkle-tree, the reference implementation internal/merkle is a port of. Never run by `go test`; not part of the Go dependency tree (ADR-0004).",
+  "scripts": {
+    "gen:fixtures": "node src/gen-fixtures.ts"
+  },
+  "dependencies": {
+    "@openzeppelin/merkle-tree": "1.0.8"
+  }
+}
