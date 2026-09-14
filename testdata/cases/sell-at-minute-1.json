@@ -1,0 +1,98 @@
+{
+  "name": "sell-at-minute-1",
+  "note": "The same sixtieth at the other end of the hour: Alice opens the Epoch holding 3600 and sends it all at minute 1, leaving a TWAB of 60 — Bob's, who never moved. Ignoring the sale would give Alice TWAB 3600 and split the funding 983/16.",
+  "epochId": 1000,
+  "devWallet": "0x0000000000000000000000000000000000000000",
+  "transfers": [
+    {
+      "timestamp": 1,
+      "from": "0x0000000000000000000000000000000000000000",
+      "to": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "value": "1000000"
+    },
+    {
+      "timestamp": 3599999,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "value": "3600"
+    },
+    {
+      "timestamp": 3599999,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "value": "60"
+    },
+    {
+      "timestamp": 3600060,
+      "from": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "to": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "value": "3600"
+    }
+  ],
+  "excludedAt": [
+    {
+      "timestamp": 0,
+      "account": "0xcccccccccccccccccccccccccccccccccccccccc"
+    }
+  ],
+  "funded": [
+    "1000",
+    "1000",
+    "1000",
+    "1000",
+    "1000"
+  ],
+  "carryIn": [
+    "0",
+    "0",
+    "0",
+    "0",
+    "0"
+  ],
+  "expected": {
+    "totalWeight": "1200000",
+    "allocations": [
+      {
+        "account": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "twab": "60",
+        "multBps": 10000,
+        "weight": "600000",
+        "amounts": [
+          "500",
+          "500",
+          "500",
+          "500",
+          "500"
+        ]
+      },
+      {
+        "account": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        "twab": "60",
+        "multBps": 10000,
+        "weight": "600000",
+        "amounts": [
+          "500",
+          "500",
+          "500",
+          "500",
+          "500"
+        ]
+      }
+    ],
+    "totals": [
+      "1000",
+      "1000",
+      "1000",
+      "1000",
+      "1000"
+    ],
+    "carryOut": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "0"
+    ],
+    "root": "0x67ba1bcdd5491d157182c04d50eece1df0252c45c95bfa7178d01a9a7c20623e"
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "name": "funding-plus-carry",
+  "note": "Spec §5: base[t] = funded[t] + carryIn[t]. funded [1000, 0, 500, 1, 0] plus carryIn [500, 0, 0, 0, 7] is a base of [1500, 0, 500, 1, 7], split 3:1 by weight — Alice [1125, 0, 375, 0, 5] and Bob [375, 0, 125, 0, 1]. Allocating over funded alone would give [750, 0, 375, 0, 0] and [250, 0, 125, 0, 0], stranding the previous Epoch's Carry for good. The unspendable single unit in token 3 and the odd unit in token 4 stay as Carry, and Bob keeps his place in the tree on the strength of tokens 0, 2 and 4 alone.",
+  "epochId": 1000,
+  "devWallet": "0x0000000000000000000000000000000000000000",
+  "transfers": [
+    {
+      "timestamp": 1,
+      "from": "0x0000000000000000000000000000000000000000",
+      "to": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "value": "1000000"
+    },
+    {
+      "timestamp": 3599999,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "value": "3"
+    },
+    {
+      "timestamp": 3599999,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "value": "1"
+    }
+  ],
+  "excludedAt": [
+    {
+      "timestamp": 0,
+      "account": "0xcccccccccccccccccccccccccccccccccccccccc"
+    }
+  ],
+  "funded": [
+    "1000",
+    "0",
+    "500",
+    "1",
+    "0"
+  ],
+  "carryIn": [
+    "500",
+    "0",
+    "0",
+    "0",
+    "7"
+  ],
+  "expected": {
+    "totalWeight": "40000",
+    "allocations": [
+      {
+        "account": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "twab": "3",
+        "multBps": 10000,
+        "weight": "30000",
+        "amounts": [
+          "1125",
+          "0",
+          "375",
+          "0",
+          "5"
+        ]
+      },
+      {
+        "account": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        "twab": "1",
+        "multBps": 10000,
+        "weight": "10000",
+        "amounts": [
+          "375",
+          "0",
+          "125",
+          "0",
+          "1"
+        ]
+      }
+    ],
+    "totals": [
+      "1500",
+      "0",
+      "500",
+      "0",
+      "6"
+    ],
+    "carryOut": [
+      "0",
+      "0",
+      "0",
+      "1",
+      "1"
+    ],
+    "root": "0xfab8800732f22a8e19fc6855ff24c1b1a77e561791a86b9efbf0262b44e7b7b0"
+  }
+}

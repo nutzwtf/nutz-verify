@@ -1,0 +1,122 @@
+{
+  "name": "transfers-within-one-hour",
+  "note": "Spec §5, sum first and divide once. Alice buys 1000 six times at ten-minute intervals, holding 1000, 2000, 3000, 4000, 5000 and 6000 for 600 seconds each: Σ = 600×21000 = 12,600,000 and TWAB = 12,600,000/3600 = 3500. Bob reaches the same integral holding 3500 still, so the two must score identically. Flooring each term instead gives 166+333+500+666+833+1000 = 3498 for Alice and splits 499/500 with 1 left as Carry — she would be docked for having traded more often.",
+  "epochId": 1000,
+  "devWallet": "0x0000000000000000000000000000000000000000",
+  "transfers": [
+    {
+      "timestamp": 1,
+      "from": "0x0000000000000000000000000000000000000000",
+      "to": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "value": "1000000"
+    },
+    {
+      "timestamp": 3599999,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "value": "3500"
+    },
+    {
+      "timestamp": 3600000,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "value": "1000"
+    },
+    {
+      "timestamp": 3600600,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "value": "1000"
+    },
+    {
+      "timestamp": 3601200,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "value": "1000"
+    },
+    {
+      "timestamp": 3601800,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "value": "1000"
+    },
+    {
+      "timestamp": 3602400,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "value": "1000"
+    },
+    {
+      "timestamp": 3603000,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "value": "1000"
+    }
+  ],
+  "excludedAt": [
+    {
+      "timestamp": 0,
+      "account": "0xcccccccccccccccccccccccccccccccccccccccc"
+    }
+  ],
+  "funded": [
+    "1000",
+    "1000",
+    "1000",
+    "1000",
+    "1000"
+  ],
+  "carryIn": [
+    "0",
+    "0",
+    "0",
+    "0",
+    "0"
+  ],
+  "expected": {
+    "totalWeight": "70000000",
+    "allocations": [
+      {
+        "account": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "twab": "3500",
+        "multBps": 10000,
+        "weight": "35000000",
+        "amounts": [
+          "500",
+          "500",
+          "500",
+          "500",
+          "500"
+        ]
+      },
+      {
+        "account": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        "twab": "3500",
+        "multBps": 10000,
+        "weight": "35000000",
+        "amounts": [
+          "500",
+          "500",
+          "500",
+          "500",
+          "500"
+        ]
+      }
+    ],
+    "totals": [
+      "1000",
+      "1000",
+      "1000",
+      "1000",
+      "1000"
+    ],
+    "carryOut": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "0"
+    ],
+    "root": "0x67ba1bcdd5491d157182c04d50eece1df0252c45c95bfa7178d01a9a7c20623e"
+  }
+}

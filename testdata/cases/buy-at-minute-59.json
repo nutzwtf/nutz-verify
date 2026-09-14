@@ -1,0 +1,98 @@
+{
+  "name": "buy-at-minute-59",
+  "note": "Engineering spec §4.2: a wallet that buys at minute 59 gets about a sixtieth of its balance. Alice's 3600 over the closing 60 seconds and Bob's 60 over the whole hour are the same TWAB of 60, so they split the funding evenly. Crediting the late buy for the whole hour would give Alice TWAB 3600 and split it 983/16. Alice's buy arrives through a relay that receives and forwards it in the same block: the relay nets to zero, never holds across an interval and so never reaches the tree, but in one of the two log orders it passes through a negative balance. Neither order may change the answer, and neither is a history that is missing logs.",
+  "epochId": 1000,
+  "devWallet": "0x0000000000000000000000000000000000000000",
+  "transfers": [
+    {
+      "timestamp": 1,
+      "from": "0x0000000000000000000000000000000000000000",
+      "to": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "value": "1000000"
+    },
+    {
+      "timestamp": 3599999,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "value": "60"
+    },
+    {
+      "timestamp": 3603540,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0x9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e",
+      "value": "3600"
+    },
+    {
+      "timestamp": 3603540,
+      "from": "0x9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e",
+      "to": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "value": "3600"
+    }
+  ],
+  "excludedAt": [
+    {
+      "timestamp": 0,
+      "account": "0xcccccccccccccccccccccccccccccccccccccccc"
+    }
+  ],
+  "funded": [
+    "1000",
+    "1000",
+    "1000",
+    "1000",
+    "1000"
+  ],
+  "carryIn": [
+    "0",
+    "0",
+    "0",
+    "0",
+    "0"
+  ],
+  "expected": {
+    "totalWeight": "1200000",
+    "allocations": [
+      {
+        "account": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "twab": "60",
+        "multBps": 10000,
+        "weight": "600000",
+        "amounts": [
+          "500",
+          "500",
+          "500",
+          "500",
+          "500"
+        ]
+      },
+      {
+        "account": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        "twab": "60",
+        "multBps": 10000,
+        "weight": "600000",
+        "amounts": [
+          "500",
+          "500",
+          "500",
+          "500",
+          "500"
+        ]
+      }
+    ],
+    "totals": [
+      "1000",
+      "1000",
+      "1000",
+      "1000",
+      "1000"
+    ],
+    "carryOut": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "0"
+    ],
+    "root": "0x67ba1bcdd5491d157182c04d50eece1df0252c45c95bfa7178d01a9a7c20623e"
+  }
+}

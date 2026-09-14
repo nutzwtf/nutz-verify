@@ -1,0 +1,102 @@
+{
+  "name": "excluded-holder",
+  "note": "Spec §5: Excluded balances are zero for every purpose, and an ExcludedAppended entry applies to the whole Epoch containing its block. The Converter holds 1,999,996 from deploy and 0xeeee… holds 1,000,000 but is appended at 3,601,800 — minute 30 of this very Epoch — so both contribute nothing and Alice and Bob split 100 as 75/25 on weights of 30,000 and 10,000. Counting either balance would swamp W and floor both real Holders to nothing; applying 0xeeee…'s entry only from its own block would give it 1,000,000×1800/3600 = 500,000, a weight of 5,000,000,000, and 99 of the 100 for itself.",
+  "epochId": 1000,
+  "devWallet": "0x0000000000000000000000000000000000000000",
+  "transfers": [
+    {
+      "timestamp": 1,
+      "from": "0x0000000000000000000000000000000000000000",
+      "to": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "value": "3000000"
+    },
+    {
+      "timestamp": 2,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "value": "1000000"
+    },
+    {
+      "timestamp": 3599999,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "value": "3"
+    },
+    {
+      "timestamp": 3599999,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "value": "1"
+    }
+  ],
+  "excludedAt": [
+    {
+      "timestamp": 0,
+      "account": "0xcccccccccccccccccccccccccccccccccccccccc"
+    },
+    {
+      "timestamp": 3601800,
+      "account": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  ],
+  "funded": [
+    "100",
+    "100",
+    "100",
+    "100",
+    "100"
+  ],
+  "carryIn": [
+    "0",
+    "0",
+    "0",
+    "0",
+    "0"
+  ],
+  "expected": {
+    "totalWeight": "40000",
+    "allocations": [
+      {
+        "account": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "twab": "3",
+        "multBps": 10000,
+        "weight": "30000",
+        "amounts": [
+          "75",
+          "75",
+          "75",
+          "75",
+          "75"
+        ]
+      },
+      {
+        "account": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        "twab": "1",
+        "multBps": 10000,
+        "weight": "10000",
+        "amounts": [
+          "25",
+          "25",
+          "25",
+          "25",
+          "25"
+        ]
+      }
+    ],
+    "totals": [
+      "100",
+      "100",
+      "100",
+      "100",
+      "100"
+    ],
+    "carryOut": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "0"
+    ],
+    "root": "0xd7c6c1ffdf7066a1f0aebf80561c516fda21564556e15b8705aba57af5cdc694"
+  }
+}

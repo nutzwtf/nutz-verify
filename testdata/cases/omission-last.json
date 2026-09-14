@@ -1,0 +1,98 @@
+{
+  "name": "omission-last",
+  "note": "Spec §5: a Holder leaves the tree only once all five of its allocations have floored to zero, and omission is computed after W. Alice holds 1,000,000,000, Carol 1000 and Dave 1, so W = 10,000,000,000,000 + 10,000,000 + 10,000 = 10,000,010,010,000. Against a base of 1,000,000 in tokens 0-3 and 1,000,000,000 in token 4, Carol floors to zero in four tokens and takes 999 in the fifth — she stays. Dave floors to zero in all five and is omitted, yet his 10,000 of weight still counted: recomputing W over the survivors alone would round Alice's first four allocations up from 999,998 to 999,999.",
+  "epochId": 1000,
+  "devWallet": "0x0000000000000000000000000000000000000000",
+  "transfers": [
+    {
+      "timestamp": 1,
+      "from": "0x0000000000000000000000000000000000000000",
+      "to": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "value": "2000000000"
+    },
+    {
+      "timestamp": 3599999,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "value": "1000000000"
+    },
+    {
+      "timestamp": 3599999,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+      "value": "1000"
+    },
+    {
+      "timestamp": 3599999,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0xd4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+      "value": "1"
+    }
+  ],
+  "excludedAt": [
+    {
+      "timestamp": 0,
+      "account": "0xcccccccccccccccccccccccccccccccccccccccc"
+    }
+  ],
+  "funded": [
+    "1000000",
+    "1000000",
+    "1000000",
+    "1000000",
+    "1000000000"
+  ],
+  "carryIn": [
+    "0",
+    "0",
+    "0",
+    "0",
+    "0"
+  ],
+  "expected": {
+    "totalWeight": "10000010010000",
+    "allocations": [
+      {
+        "account": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "twab": "1000000000",
+        "multBps": 10000,
+        "weight": "10000000000000",
+        "amounts": [
+          "999998",
+          "999998",
+          "999998",
+          "999998",
+          "999998999"
+        ]
+      },
+      {
+        "account": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+        "twab": "1000",
+        "multBps": 10000,
+        "weight": "10000000",
+        "amounts": [
+          "0",
+          "0",
+          "0",
+          "0",
+          "999"
+        ]
+      }
+    ],
+    "totals": [
+      "999998",
+      "999998",
+      "999998",
+      "999998",
+      "999999998"
+    ],
+    "carryOut": [
+      "2",
+      "2",
+      "2",
+      "2",
+      "2"
+    ],
+    "root": "0x539288909241d346fdb434647239af4de95d19c5d68905e5dbf133220b6072de"
+  }
+}

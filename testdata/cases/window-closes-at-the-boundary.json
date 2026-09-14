@@ -1,0 +1,92 @@
+{
+  "name": "window-closes-at-the-boundary",
+  "note": "Spec §5: the final sub-interval runs to 3600(e+1) = 3,603,600, not to the last transfer in the Epoch at 3,601,800. Alice holds 3600 untouched (TWAB 3600) and Bob receives 2400 in that final transfer, holding it for the closing 1800 seconds (TWAB = 2400×1800/3600 = 1200), so the funding splits 750/250. Closing the window at the last transfer instead would give Alice 3600×1800/3600 = 1800, Bob nothing at all, and hand Alice the whole 1000. Note what this Case cannot pin: a Case carries timestamps, never blocks, so spec §5's \"the end block is the last block with timestamp < 3600(e+1)\" — which blocks a Recompute reads at all — belongs to the chain reader and its own tests.",
+  "epochId": 1000,
+  "devWallet": "0x0000000000000000000000000000000000000000",
+  "transfers": [
+    {
+      "timestamp": 1,
+      "from": "0x0000000000000000000000000000000000000000",
+      "to": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "value": "1000000"
+    },
+    {
+      "timestamp": 3599999,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "value": "3600"
+    },
+    {
+      "timestamp": 3601800,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "value": "2400"
+    }
+  ],
+  "excludedAt": [
+    {
+      "timestamp": 0,
+      "account": "0xcccccccccccccccccccccccccccccccccccccccc"
+    }
+  ],
+  "funded": [
+    "1000",
+    "1000",
+    "1000",
+    "1000",
+    "1000"
+  ],
+  "carryIn": [
+    "0",
+    "0",
+    "0",
+    "0",
+    "0"
+  ],
+  "expected": {
+    "totalWeight": "48000000",
+    "allocations": [
+      {
+        "account": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "twab": "3600",
+        "multBps": 10000,
+        "weight": "36000000",
+        "amounts": [
+          "750",
+          "750",
+          "750",
+          "750",
+          "750"
+        ]
+      },
+      {
+        "account": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        "twab": "1200",
+        "multBps": 10000,
+        "weight": "12000000",
+        "amounts": [
+          "250",
+          "250",
+          "250",
+          "250",
+          "250"
+        ]
+      }
+    ],
+    "totals": [
+      "1000",
+      "1000",
+      "1000",
+      "1000",
+      "1000"
+    ],
+    "carryOut": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "0"
+    ],
+    "root": "0xe3444449d1d8ab142ac3526bc3d0ac7421485fe6a00b941f5ed17616bcc37e13"
+  }
+}

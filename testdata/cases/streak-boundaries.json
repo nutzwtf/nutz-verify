@@ -1,0 +1,136 @@
+{
+  "name": "streak-boundaries",
+  "note": "Spec §5: streakDays = floor((3600(e+1) − max(lastSellAt, firstBuyAt)) / 86400), measured to the same boundary the TWAB window closes at. Four wallets hold 100 each, bought 604,799 / 604,800 / 2,591,999 / 2,592,000 seconds before 3,603,600 — streaks of 6, 7, 29 and 30 days, so 1.00x, 1.25x, 1.25x and 1.50x. W = 5,000,000 splits 1000 as 200/250/250/300. Measured to the last transfer in the Epoch at 3,601,800 instead, the streaks become 6, 6, 29 and 29 and the split becomes 222/222/277/277. 0x5555… receives 1 in that final transfer, floors to a TWAB of 0 and never reaches the tree.",
+  "epochId": 1000,
+  "devWallet": "0x0000000000000000000000000000000000000000",
+  "transfers": [
+    {
+      "timestamp": 1,
+      "from": "0x0000000000000000000000000000000000000000",
+      "to": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "value": "1000000"
+    },
+    {
+      "timestamp": 2998801,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0x1111111111111111111111111111111111111111",
+      "value": "100"
+    },
+    {
+      "timestamp": 2998800,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0x2222222222222222222222222222222222222222",
+      "value": "100"
+    },
+    {
+      "timestamp": 1011601,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0x3333333333333333333333333333333333333333",
+      "value": "100"
+    },
+    {
+      "timestamp": 1011600,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0x4444444444444444444444444444444444444444",
+      "value": "100"
+    },
+    {
+      "timestamp": 3601800,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0x5555555555555555555555555555555555555555",
+      "value": "1"
+    }
+  ],
+  "excludedAt": [
+    {
+      "timestamp": 0,
+      "account": "0xcccccccccccccccccccccccccccccccccccccccc"
+    }
+  ],
+  "funded": [
+    "1000",
+    "1000",
+    "1000",
+    "1000",
+    "1000"
+  ],
+  "carryIn": [
+    "0",
+    "0",
+    "0",
+    "0",
+    "0"
+  ],
+  "expected": {
+    "totalWeight": "5000000",
+    "allocations": [
+      {
+        "account": "0x1111111111111111111111111111111111111111",
+        "twab": "100",
+        "multBps": 10000,
+        "weight": "1000000",
+        "amounts": [
+          "200",
+          "200",
+          "200",
+          "200",
+          "200"
+        ]
+      },
+      {
+        "account": "0x2222222222222222222222222222222222222222",
+        "twab": "100",
+        "multBps": 12500,
+        "weight": "1250000",
+        "amounts": [
+          "250",
+          "250",
+          "250",
+          "250",
+          "250"
+        ]
+      },
+      {
+        "account": "0x3333333333333333333333333333333333333333",
+        "twab": "100",
+        "multBps": 12500,
+        "weight": "1250000",
+        "amounts": [
+          "250",
+          "250",
+          "250",
+          "250",
+          "250"
+        ]
+      },
+      {
+        "account": "0x4444444444444444444444444444444444444444",
+        "twab": "100",
+        "multBps": 15000,
+        "weight": "1500000",
+        "amounts": [
+          "300",
+          "300",
+          "300",
+          "300",
+          "300"
+        ]
+      }
+    ],
+    "totals": [
+      "1000",
+      "1000",
+      "1000",
+      "1000",
+      "1000"
+    ],
+    "carryOut": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "0"
+    ],
+    "root": "0x8fb5c2361439ae03aa4689244e314ff362448c9d5ed98bd469feb5be4f638989"
+  }
+}

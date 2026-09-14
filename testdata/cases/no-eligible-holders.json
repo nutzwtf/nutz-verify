@@ -1,0 +1,53 @@
+{
+  "name": "no-eligible-holders",
+  "note": "Spec §5: W == 0 is a legitimate state, not an error. The Converter is the only address holding NUTZ and it is Excluded, so a funded Epoch produces no Allocations and no Root at all — engineering spec §3.3's Skipped mechanism rolls the whole base of 5100 per token into Carry. A root of null is the expectation here, and the Verifier reports MATCH for it rather than INDETERMINATE.",
+  "epochId": 1000,
+  "devWallet": "0x0000000000000000000000000000000000000000",
+  "transfers": [
+    {
+      "timestamp": 1,
+      "from": "0x0000000000000000000000000000000000000000",
+      "to": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "value": "1000000"
+    }
+  ],
+  "excludedAt": [
+    {
+      "timestamp": 0,
+      "account": "0xcccccccccccccccccccccccccccccccccccccccc"
+    }
+  ],
+  "funded": [
+    "5000",
+    "5000",
+    "5000",
+    "5000",
+    "5000"
+  ],
+  "carryIn": [
+    "100",
+    "100",
+    "100",
+    "100",
+    "100"
+  ],
+  "expected": {
+    "totalWeight": "0",
+    "allocations": [],
+    "totals": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "0"
+    ],
+    "carryOut": [
+      "5100",
+      "5100",
+      "5100",
+      "5100",
+      "5100"
+    ],
+    "root": null
+  }
+}
