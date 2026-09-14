@@ -118,10 +118,12 @@ pattern would duplicate helpers to buy nothing.
   `script/config/robinhood.json`, whose `signers` and `keeper` are still the zero address pending
   that file's own TODO, and the `Signers` constructor reverts `ZeroAddress` on them. The script also
   deploys the Converter and the Draw, from which this ticket decodes nothing. The harness therefore
-  deploys the same compiled `NutzDistributor` artifact directly. Filed as **ticket 09**, which also
-  has to settle how the script is pointed at a config that is not the hardcoded one — a question
-  for `nutz-contracts`. Worth doing: the deploy path we actually use, including the Converter
-  address prediction and `checkRoles`, is untested anywhere today.
+  deploys the same compiled `NutzDistributor` artifact directly. **Ticket 09 is closed wontfix**:
+  the deploy path is already covered by `nutz-contracts/test/unit/Deploy.t.sol` — the Converter
+  address prediction, the revert when it misses, `checkRoles`, the Draw wiring — so running the
+  script from here would buy no decoding coverage and couple this suite to a sibling repo's script
+  API. The one real gap it found belongs over there and is written up in 09: nothing asserts that
+  the committed `robinhood.json` actually deploys, and today it cannot.
 
 ### Follow-ups, not done here
 
@@ -134,8 +136,9 @@ pattern would duplicate helpers to buy nothing.
 - Two defensive branches in `endpoint.call` are unreachable and so uncovered (marshalling a struct
   we built; building a request from a URL `url.Parse` already accepted). Every other function in
   the package is at 100% of statements, 99.6% for the package and 99.7% across `internal/`.
-- **CI does not exist yet and must set `NUTZ_VERIFY_REQUIRE_ANVIL`**, or the harness it was built
-  for will skip there and ADR-0004's bargain goes unenforced.
+- CI now exists and requires the harness — **ticket 10**. The enforcement variable was split in two
+  while building it (`NUTZ_VERIFY_REQUIRE_ANVIL` for the tools, `NUTZ_VERIFY_REQUIRE_FORK` for the
+  fork) so the decoders meet a real node on every push rather than only nightly.
 - Carried over and still open: no `LICENSE` at the repo root though spec §3 says MIT; `go.mod` says
   `go 1.24.0` rather than spec §3's conservative directive; nothing exports the fixture set to the
   Solidity and TypeScript implementations ADR-0003 names.

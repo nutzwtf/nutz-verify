@@ -1,31 +1,57 @@
 # 09 — Point the anvil harness at `script/Deploy.s.sol`
 
-Status: needs-info
+Status: wontfix
 Type: task
 Spec: ../spec.md §10; ticket 03
 Blocked by: —
-External blocker: `nutz-contracts` must fill in `script/config/robinhood.json`
 
-Ticket 03 asked for the harness to run `nutz-contracts/script/Deploy.s.sol`. It does not, and today
-it cannot: `run()` hardcodes `script/config/robinhood.json`, whose `signers` and `keeper` are all
-the zero address pending that file's own TODO, and the `Signers` constructor reverts `ZeroAddress`
-on them. The harness deploys the same compiled `NutzDistributor` artifact directly instead.
+Ticket 03 asked for the harness to run `nutz-contracts/script/Deploy.s.sol`. It does not: `run()`
+hardcodes `script/config/robinhood.json`, whose `signers` and `keeper` are all the zero address
+pending that file's own TODO, and the `Signers` constructor reverts `ZeroAddress` on them. The
+harness deploys the same compiled `NutzDistributor` artifact directly instead.
 
-That is sound for what ticket 03 decodes — the four log and call shapes come from the Distributor
-alone, and neither the Converter nor the Draw appears in any of them. What it does not cover is the
-deploy path we will actually use: the Converter address prediction, the `checkRoles` assertion, and
-the constructor arguments coming from a config file rather than from the harness.
+**This ticket's original justification was wrong and it is closed unbuilt.** It claimed the deploy
+path was "untested anywhere today". It is tested, in the repo that owns it:
+`nutz-contracts/test/unit/Deploy.t.sol` covers the Converter address prediction
+(`test_deploy_converterLandsOnTheDistributorsImmutable`), the revert when the prediction misses,
+`checkRoles` for a differing keeper and for a differing Signer, and the Draw's wiring. Every
+argument for running the script from here was an argument for coverage that already exists.
 
-## Done when
+Running it from here would also buy no decoding coverage at all. The four log and call shapes
+ticket 03 decodes come from the Distributor alone; neither the Converter nor the Draw appears in
+any of them. What it would buy is a coupling from this repo's test suite to a sibling repo's
+script API, for a path that repo already tests.
 
-The harness invokes `Deploy.s.sol` against the anvil fork with a config carrying real addresses, and
-reads its logged Distributor address instead of deploying one itself. Two things to settle first:
+## The real gap, which belongs to `nutz-contracts`
 
-- **Whose config.** `run()` reads one hardcoded path, so either `nutz-contracts` grows a way to
-  point it elsewhere (an env var, or a second entry point taking a path), or this repo builds an
-  overlay root. The first is cleaner and is a question for them.
-- **Whether the fork has the EIP-2537 precompiles.** `NutzDraw`'s constructor self-test reverts
-  `VerifierSelfTestFailed` without them, and it is deployed third. Chain 4663 is claimed to have
-  them (ADR-0004 over there); a fork of it should, but that is unverified here.
+`test_load_readsTheRobinhoodConfig` asserts every field of the committed config **except `signers`
+and `keeper`** — exactly the two that are still zero — and nothing feeds `load()`'s result into
+`deploy()`. So nobody asserts that the committed config actually deploys, and today it cannot.
 
-Until then the harness says what it deploys and why, in a comment at the top of `anvil_test.go`.
+That is one test over there, and it is better than anything this harness could do, because it
+exercises the real config rather than harness-invented addresses:
+
+```solidity
+function test_deploy_theCommittedConfigActuallyDeploys() public {
+    Deploy.Params memory p = script.load(string.concat(vm.projectRoot(), "/script/config/robinhood.json"));
+    script.deploy(p, address(script));
+}
+```
+
+It fails today on `ZeroAddress`, which is the point: it turns the config's TODO into a red test and
+a launch gate, rather than a comment nobody is blocked by. `deploy()` is `public` and the existing
+`setUp` already does `vm.warp(1_800_000_000)`, so nothing else is needed.
+
+**Hand this to `nutz-contracts` as an issue on their tracker.** Nothing in this repo changes.
+
+## If it is ever reopened
+
+The blocker is mechanical, not conceptual: `run()` reads one hardcoded path, so either that repo
+grows a way to point it elsewhere (an env var through `vm.envOr`, or a second entry point taking a
+path — both also need a `fs_permissions` entry), or this repo builds an overlay root of symlinks so
+`vm.projectRoot()` resolves to a directory carrying our config. The second needs nothing from them
+and was rejected as fragile for the value.
+
+Also unverified: whether a fork of 4663 has the EIP-2537 precompiles `NutzDraw`'s constructor
+self-test requires. It is deployed third by the script, so running `Deploy.s.sol` at all depends on
+it.

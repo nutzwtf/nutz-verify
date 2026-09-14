@@ -1,6 +1,7 @@
 package chain
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -26,9 +28,17 @@ import (
 // we made twice in the same direction would cancel out in a round trip; it cannot cancel out
 // against foundry.
 //
-// The test skips, loudly and with the reason, when the tools or the contracts are not here —
-// unless NUTZ_VERIFY_REQUIRE_ANVIL is set, which turns every one of those skips into a
-// failure. CI sets it. A harness that quietly does not run is ADR-0004's bargain quietly not
+// The test skips, loudly and with the reason, when the tools or the contracts are not here.
+// Two environment variables turn those skips into failures, and they are separate on purpose:
+//
+//   - NUTZ_VERIFY_REQUIRE_ANVIL — anvil, cast and a built nutz-contracts must be present. A
+//     bare node satisfies it, so this needs no secrets and CI can demand it on every push.
+//   - NUTZ_VERIFY_REQUIRE_FORK — the node must really be a fork of 4663, which needs an
+//     archive endpoint. CI demands this nightly.
+//
+// One variable for both would mean the decoders could only be required to meet a node where
+// the archive secret is available, which is nightly — and a decoder regression would then sit
+// unnoticed for a day. A harness that quietly does not run is ADR-0004's bargain quietly not
 // being kept: a green suite with none of the decoders ever having met a node.
 
 // The well-known anvil development keys. Public constants of the tool, funded on every fresh
@@ -52,8 +62,34 @@ type anvil struct {
 	contracts string
 	forked    bool
 
+	// log is anvil's stderr, and exited closes when the process does. Together they turn
+	// "the node never answered" — a bad archive URL, an upstream 401, a rate limit — from a
+	// silent wait into the reason it did not.
+	log    *lockedBuffer
+	exited chan struct{}
+
 	// accounts are the addresses of anvilKeys, in the same order.
 	accounts [5]Address
+}
+
+// lockedBuffer collects a subprocess's output from its own goroutine.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return strings.TrimSpace(b.buf.String())
 }
 
 // startAnvil brings up a node, forking chain 4663 when an archive URL is available.
@@ -79,23 +115,31 @@ func startAnvil(t *testing.T) *anvil {
 	if forkURL == "" {
 		// A bare node still exercises every decoder, which is what ADR-0004 needs, so this
 		// degrades rather than stopping. What it cannot answer is anything about chain 4663
-		// itself, so the subtests that ask about the chain skip themselves. Required mode
-		// insists on the real thing.
-		requireFork(t)
+		// itself, so the subtests that ask about the chain skip themselves below.
+		noFork(t)
 		args = append(args, "--chain-id", fmt.Sprint(harnessChainID))
 	} else {
 		args = append(args, "--fork-url", forkURL)
 	}
 
+	log := &lockedBuffer{}
+
 	cmd := exec.Command("anvil", args...)
 	cmd.Dir = contracts
+	cmd.Stderr = log
 	if err := cmd.Start(); err != nil {
 		unavailable(t, "anvil harness: %v", err)
 	}
 
+	exited := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(exited)
+	}()
+
 	t.Cleanup(func() {
 		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+		<-exited
 	})
 
 	a := &anvil{
@@ -103,6 +147,8 @@ func startAnvil(t *testing.T) *anvil {
 		rpc:       fmt.Sprintf("http://127.0.0.1:%d", port),
 		contracts: contracts,
 		forked:    forkURL != "",
+		log:       log,
+		exited:    exited,
 	}
 	a.await()
 
@@ -113,15 +159,40 @@ func startAnvil(t *testing.T) *anvil {
 	return a
 }
 
-// await waits for the node to answer. A fork has an upstream to reach first, so this is
-// generous; a node that never comes up skips rather than failing, because a missing archive
-// endpoint is a machine that cannot run this test, not a broken Verifier.
+// startupBudget is how long the node has to answer. A fork must reach an archive endpoint and
+// pull a block before it binds, and a busy or rate-limited provider makes that minutes rather
+// than seconds; a bare node is up almost immediately, so waiting that long for one only turns
+// a mistake into a slow mistake.
+func startupBudget(forked bool) time.Duration {
+	if forked {
+		return 3 * time.Minute
+	}
+
+	return 20 * time.Second
+}
+
+// await waits for the node to answer, and says why if it does not.
+//
+// Two ways to fail, and they need different messages: anvil exiting — a bad archive URL, an
+// upstream 401 — leaves its reason on stderr, while anvil still running at the deadline is a
+// slow or throttled upstream. Reporting either as "never answered" makes a CI failure
+// something to reproduce locally rather than something to read.
 func (a *anvil) await() {
 	a.t.Helper()
 
-	deadline := time.Now().Add(60 * time.Second)
+	// Short per-probe timeout: the budget is for the node coming up, not for one connection
+	// hanging its way through all of it.
+	probe := &http.Client{Timeout: 5 * time.Second}
+	deadline := time.Now().Add(startupBudget(a.forked))
+
 	for time.Now().Before(deadline) {
-		resp, err := http.Post(a.rpc, "application/json",
+		select {
+		case <-a.exited:
+			unavailable(a.t, "anvil harness: anvil exited before it answered: %s", a.log)
+		default:
+		}
+
+		resp, err := probe.Post(a.rpc, "application/json",
 			strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}`))
 		if err == nil {
 			resp.Body.Close()
@@ -132,7 +203,8 @@ func (a *anvil) await() {
 		time.Sleep(200 * time.Millisecond)
 	}
 
-	unavailable(a.t, "anvil harness: the node at %s never answered", a.rpc)
+	unavailable(a.t, "anvil harness: the node at %s did not answer within %s: %s",
+		a.rpc, startupBudget(a.forked), a.log)
 }
 
 // cast runs one foundry command and returns its trimmed output.
@@ -357,14 +429,12 @@ func requireTool(t *testing.T, dir, name string) {
 	}
 }
 
-// unavailable ends the harness: a skip normally, a failure when NUTZ_VERIFY_REQUIRE_ANVIL is
-// set.
+// unavailable ends the harness: a skip normally, a failure under NUTZ_VERIFY_REQUIRE_ANVIL.
 //
 // ADR-0004 trades "we own the decoding bugs" for "the anvil harness exercises every decoder
-// against a real node before launch". A machine without foundry should still be able to run
-// `go test ./...`, so the default is a skip — but somewhere that trade has to be enforced, and
-// a skip nobody reads does not enforce it. CI sets the variable and a missing tool, a missing
-// contracts checkout or a missing fork URL all fail there.
+// against a real node". A machine without foundry should still be able to run `go test ./...`,
+// so the default is a skip — but somewhere that trade has to be enforced, and a skip nobody
+// reads does not enforce it.
 func unavailable(t *testing.T, format string, args ...any) {
 	t.Helper()
 
@@ -375,15 +445,16 @@ func unavailable(t *testing.T, format string, args ...any) {
 	t.Skipf(format, args...)
 }
 
-// requireFork reports the degradation to a bare node — fatally in required mode, where "the
-// fork of 4663" is the point, and as a log otherwise.
-func requireFork(t *testing.T) {
+// noFork reports the degradation to a bare node — fatally under NUTZ_VERIFY_REQUIRE_FORK,
+// where the fork is the point, and as a log otherwise. The run continues either way: every
+// decoder is still exercised against a node, which is the part ADR-0004 bought.
+func noFork(t *testing.T) {
 	t.Helper()
 
 	const message = "anvil harness: no NUTZ_VERIFY_FORK_RPC or RPC_4663, so this is a bare node " +
 		"and not the fork of 4663 spec §10 asks for"
 
-	if os.Getenv("NUTZ_VERIFY_REQUIRE_ANVIL") != "" {
+	if os.Getenv("NUTZ_VERIFY_REQUIRE_FORK") != "" {
 		t.Fatal(message)
 	}
 
