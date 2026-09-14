@@ -165,7 +165,7 @@ through the real `Reader`:
 |---|---|
 | Wall time | **4 m 53 s** |
 | Records | 35,174 (**7.0 per block**) |
-| HTTP requests | 228 (3 log pages, ~225 header batches of 20), no 429 |
+| HTTP requests | 228 (5 `eth_getLogs` pages, one per 1,000-block chunk, and 223 header batches of 20), no 429 |
 | Effective pace | ~15 calls/s, **17 blocks/s** |
 | Replay of the file, every CRC verified | 4 ms, 8.3 M records/s (a 4 MB file, so mostly fixed cost) |
 

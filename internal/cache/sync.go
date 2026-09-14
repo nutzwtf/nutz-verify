@@ -54,8 +54,10 @@ type Synced struct {
 // it is checked against the chain by block hash; if the chain no longer has that block,
 // the fork block is found by binary search over the held records and everything from it on
 // is truncated (spec §9). Then the blocks after the newest held record are read up to tip
-// and appended, a chunk at a time, so a sync that fails partway leaves every whole chunk
-// before the failure on disk and resumes after it.
+// and appended, a chunk at a time, so a sync that fails partway keeps every whole chunk
+// before the failure and the next one resumes after them. (Keeps, not necessarily on disk:
+// chunks reach the file at the next checkpoint or Close, and a process killed before that
+// loses them and refetches them, which is the bargain the package makes.)
 //
 // Records held past tip are left as they are: a stricter finality than last time is not a
 // reorg, and they are checked when a tip reaches them.
@@ -165,7 +167,7 @@ func (c *Cache) verify(ctx context.Context, src Source, tipNumber uint64) (*Reor
 	// The newest record is gone, so somewhere in [0, n) the chain forked, and "still on
 	// chain" is true up to that point and false after it. Binary search for the first
 	// false; every probe is one header read.
-	fork, err := searchErr(n, func(i int64) (bool, error) {
+	fork, err := firstWhere(n, func(i int64) (bool, error) {
 		ok, err := stillOnChain(i)
 
 		return !ok, err
@@ -226,7 +228,7 @@ func (c *Cache) Truncate(block uint64) (int64, error) {
 // firstAtOrAbove is the index of the first record from block on, or Len if there is none.
 // The write buffer must be flushed.
 func (c *Cache) firstAtOrAbove(block uint64) (int64, error) {
-	return searchErr(c.count, func(i int64) (bool, error) {
+	return firstWhere(c.count, func(i int64) (bool, error) {
 		r, err := c.recordAt(i)
 
 		return r.BlockNumber >= block, err
@@ -248,9 +250,9 @@ func (c *Cache) recordAt(i int64) (Record, error) {
 	return r, nil
 }
 
-// searchErr is sort.Search over a predicate that can fail. The predicate must be false then
-// true over [0, n); the result is the first true, or n.
-func searchErr(n int64, pred func(int64) (bool, error)) (int64, error) {
+// firstWhere is the first index in [0, n) at which pred holds, or n: sort.Search over a
+// predicate that can fail. pred must be false then true over the range.
+func firstWhere(n int64, pred func(int64) (bool, error)) (int64, error) {
 	var failed error
 	i := sort.Search(int(n), func(i int) bool {
 		if failed != nil {

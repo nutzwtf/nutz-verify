@@ -60,9 +60,9 @@ const (
 	// stride is a payload and its CRC32C; the unit the file is measured in.
 	stride = payloadSize + 4
 
-	// checkpointRecords is how many appended records go by between fsyncs. Every 10,000 is
-	// on the flat part of the measured curve and bounds a crash's loss to ~1.2 MB of
-	// refetchable history.
+	// checkpointRecords is how many appended records may sit unsynced before the next
+	// Append fsyncs. Every 10,000 is on the flat part of the measured curve, and since a
+	// batch is written whole, a crash loses at most a batch past that of refetchable history.
 	checkpointRecords = 10_000
 
 	// bufferSize is the read and write buffer. Sequential I/O in 1 MiB steps is what the
@@ -205,7 +205,7 @@ type Cache struct {
 	start   uint64
 	pending int // records appended since the last checkpoint
 
-	repair *Repair
+	repaired *Repair
 }
 
 // Open opens or creates the Cache in dir, verifies every record on the way in, and repairs
@@ -257,6 +257,21 @@ func (c *Cache) load(opts Options) error {
 		return c.writeHeader(opts)
 	}
 
+	// Shorter than a header is a crash during the first write of a fresh cache. Nothing of
+	// ours can be in it, so it is the empty case with a note, not a refusal.
+	if info.Size() < headerSize {
+		if err := c.file.Truncate(0); err != nil {
+			return fmt.Errorf("cache: %w", err)
+		}
+		if err := c.writeHeader(opts); err != nil {
+			return err
+		}
+
+		c.repaired = &Repair{Reason: fmt.Sprintf("a partial header of %d bytes", info.Size())}
+
+		return nil
+	}
+
 	if err := c.checkHeader(opts); err != nil {
 		return err
 	}
@@ -283,7 +298,7 @@ func (c *Cache) writeHeader(opts Options) error {
 func (c *Cache) checkHeader(opts Options) error {
 	var buf [headerSize]byte
 	if _, err := io.ReadFull(io.NewSectionReader(c.file, 0, headerSize), buf[:]); err != nil {
-		return fmt.Errorf("cache: %s is shorter than a cache header; pass --fresh to rebuild it", FileName)
+		return fmt.Errorf("cache: reading the header of %s: %w", FileName, err)
 	}
 
 	if string(buf[0:8]) != magic {
@@ -314,32 +329,38 @@ func (c *Cache) checkHeader(opts Options) error {
 }
 
 // Repair is what Open found wrong with the file and did about it: it truncated to the last
-// record that verified. Everything dropped is refetched by the next Sync.
+// whole block that verified. Everything dropped is refetched by the next Sync.
+//
+// A whole block, not the last good record. A checkpoint falls wherever 10,000 records fall,
+// so damage can land inside a block, and the good records before it in that block are not
+// the whole block. Sync resumes after the last held block, so keeping half of one would lose
+// the other half for good and every later TWAB would be quietly wrong.
 type Repair struct {
-	// Reason says what was wrong with the first bad record: a short tail, a CRC failure, or
-	// a block number out of order.
+	// Reason says what was wrong with record At: a short tail, a CRC failure, or a block
+	// number out of order.
 	Reason string
+	At     int64
 
-	// Kept is how many records verified before the damage, and LastGoodBlock the block
-	// number of the last of them — where the history is intact up to. Zero when nothing
-	// survived.
+	// Kept is how many records survived, and LastGoodBlock the block the kept history runs
+	// through — every record of it is held. Zero when nothing survived.
 	Kept          int64
 	LastGoodBlock uint64
 
-	// Dropped is how many complete records were discarded, not counting a partial tail.
+	// Dropped is how many complete records were discarded, not counting a partial tail:
+	// the damaged ones, and the good ones of the block the damage fell in.
 	Dropped int64
 }
 
 func (r *Repair) String() string {
-	return fmt.Sprintf("cache: %s after record %d (block %d); kept %d records and dropped %d, "+
-		"which the next sync refetches", r.Reason, r.Kept, r.LastGoodBlock, r.Kept, r.Dropped)
+	return fmt.Sprintf("cache: %s at record %d; kept %d records through block %d and dropped %d, "+
+		"which the next sync refetches", r.Reason, r.At, r.Kept, r.LastGoodBlock, r.Dropped)
 }
 
 // Repaired is what Open had to do to the file, or nil when it verified end to end.
-func (c *Cache) Repaired() *Repair { return c.repair }
+func (c *Cache) Repaired() *Repair { return c.repaired }
 
-// scan verifies every record from the header to the end, and truncates at the first that
-// does not verify.
+// scan verifies every record from the header to the end, and truncates at the start of
+// the block the first bad record falls in.
 //
 // The whole file, on every open. Replaying it is what a Recompute does anyway, and a check
 // that stopped at the tail would leave a flipped bit in the middle to surface as a MISMATCH
@@ -348,7 +369,12 @@ func (c *Cache) scan(size int64) error {
 	reader := bufio.NewReaderSize(io.NewSectionReader(c.file, headerSize, size-headerSize), bufferSize)
 
 	var buf [stride]byte
-	var prev Record
+
+	// blockStart is the index of the first record of the block c.last is in, and
+	// beforeBlock the block of the record before that: what survives if this block has to
+	// go.
+	var blockStart int64
+	var beforeBlock uint64
 
 	for {
 		n, err := io.ReadFull(reader, buf[:])
@@ -356,7 +382,7 @@ func (c *Cache) scan(size int64) error {
 			return nil
 		}
 		if err == io.ErrUnexpectedEOF {
-			return c.truncateAt(c.count, fmt.Sprintf("a partial record of %d bytes", n), 0)
+			return c.repair(fmt.Sprintf("a partial record of %d bytes", n), size, blockStart, beforeBlock)
 		}
 		if err != nil {
 			return fmt.Errorf("cache: reading record %d: %w", c.count, err)
@@ -365,40 +391,46 @@ func (c *Cache) scan(size int64) error {
 		r, ok := decode(buf[:])
 		switch {
 		case !ok:
-			return c.truncateAt(c.count, "a record that fails its checksum", size)
+			return c.repair("a record that fails its checksum", size, blockStart, beforeBlock)
 		case r.BlockNumber < c.start:
-			return c.truncateAt(c.count, fmt.Sprintf("a record from block %d, before the start block %d",
-				r.BlockNumber, c.start), size)
-		case c.count > 0 && r.BlockNumber < prev.BlockNumber:
-			return c.truncateAt(c.count, fmt.Sprintf("a record from block %d, behind the previous %d",
-				r.BlockNumber, prev.BlockNumber), size)
+			return c.repair(fmt.Sprintf("a record from block %d, before the start block %d",
+				r.BlockNumber, c.start), size, blockStart, beforeBlock)
+		case c.count > 0 && r.BlockNumber < c.last.BlockNumber:
+			return c.repair(fmt.Sprintf("a record from block %d, behind the previous %d",
+				r.BlockNumber, c.last.BlockNumber), size, blockStart, beforeBlock)
 		}
 
-		prev = r
+		if c.count > 0 && r.BlockNumber != c.last.BlockNumber {
+			blockStart, beforeBlock = c.count, c.last.BlockNumber
+		}
+
 		c.count++
 		c.last = r
 	}
 }
 
-// truncateAt cuts the file to record index i during scan, recording why. size is the
-// file's length before the cut, for counting what was dropped; zero for a partial tail.
-func (c *Cache) truncateAt(i int64, reason string, size int64) error {
-	repair := &Repair{Reason: reason, Kept: i}
-	if i > 0 {
-		repair.LastGoodBlock = c.last.BlockNumber
-	}
-	if size > 0 {
-		repair.Dropped = (size - headerSize - i*stride) / stride
-	}
+// repair cuts the file back to record index keep during scan — the start of the block the
+// damage at c.count fell in — and records why. size is the file's length before the cut.
+func (c *Cache) repair(reason string, size, keep int64, lastGoodBlock uint64) error {
+	complete := (size - headerSize) / stride
 
-	if err := c.file.Truncate(offsetOf(i)); err != nil {
-		return fmt.Errorf("cache: truncating to record %d: %w", i, err)
+	if err := c.file.Truncate(offsetOf(keep)); err != nil {
+		return fmt.Errorf("cache: truncating to record %d: %w", keep, err)
 	}
 	if err := c.sync(); err != nil {
 		return err
 	}
 
-	c.repair = repair
+	c.repaired = &Repair{Reason: reason, At: c.count, Kept: keep, LastGoodBlock: lastGoodBlock, Dropped: complete - keep}
+	c.count = keep
+	if keep == 0 {
+		c.last = Record{}
+	} else {
+		var err error
+		if c.last, err = c.recordAt(keep - 1); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
@@ -415,9 +447,11 @@ func (c *Cache) Last() (Record, bool) {
 	return c.last, c.count > 0
 }
 
-// Append adds records in order. A batch runs forward: its block numbers are non-decreasing
-// and none is behind the last record already held, because the Cache is a prefix of the
-// chain's history and a record out of place would break every replay's ordering.
+// Append adds records in order, all of them or none. A batch runs forward: its block numbers
+// are non-decreasing and none is behind the last record already held, because the Cache is
+// a prefix of the chain's history and a record out of place would break every replay's
+// ordering. It is also whole blocks, which is the caller's to keep — Sync's chunks are — and
+// which all-or-nothing preserves: a batch that is refused leaves the file as it was.
 //
 // Not durable until the next checkpoint or Close. A crash loses the tail, and Open refetches
 // it; that is the bargain the package comment makes.
@@ -426,33 +460,33 @@ func (c *Cache) Append(records []Record) error {
 	if c.count > 0 {
 		floor = c.last.BlockNumber
 	}
+
+	encoded := make([]byte, len(records)*stride)
 	for i, r := range records {
 		if r.BlockNumber < floor {
 			return fmt.Errorf("cache: record %d of the batch is from block %d, behind block %d",
 				i, r.BlockNumber, floor)
 		}
+		if err := r.encode(encoded[i*stride : (i+1)*stride]); err != nil {
+			return fmt.Errorf("cache: record %d of the batch, at block %d: %w", i, r.BlockNumber, err)
+		}
 
 		floor = r.BlockNumber
 	}
 
-	var buf [stride]byte
-	for i, r := range records {
-		if err := r.encode(buf[:]); err != nil {
-			return fmt.Errorf("cache: record %d of the batch, at block %d: %w", i, r.BlockNumber, err)
-		}
-		if _, err := c.writer.Write(buf[:]); err != nil {
-			return fmt.Errorf("cache: %w", err)
-		}
+	if len(records) == 0 {
+		return nil
+	}
+	if _, err := c.writer.Write(encoded); err != nil {
+		return fmt.Errorf("cache: %w", err)
+	}
 
-		c.count++
-		c.last = r
-		c.pending++
+	c.count += int64(len(records))
+	c.last = records[len(records)-1]
+	c.pending += len(records)
 
-		if c.pending >= checkpointRecords {
-			if err := c.checkpoint(); err != nil {
-				return err
-			}
-		}
+	if c.pending >= checkpointRecords {
+		return c.checkpoint()
 	}
 
 	return nil
@@ -490,6 +524,7 @@ func (c *Cache) Each(fn func(Record) error) error {
 	reader := bufio.NewReaderSize(io.NewSectionReader(c.file, headerSize, c.count*stride), bufferSize)
 
 	var buf [stride]byte
+	var prev uint64
 	for i := range c.count {
 		if _, err := io.ReadFull(reader, buf[:]); err != nil {
 			return fmt.Errorf("cache: reading record %d of %d: %w", i, c.count, err)
@@ -497,13 +532,15 @@ func (c *Cache) Each(fn func(Record) error) error {
 
 		r, ok := decode(buf[:])
 		if !ok {
-			return fmt.Errorf("cache: record %d fails its checksum after block %d; "+
-				"the file changed underneath this run", i, c.last.BlockNumber)
+			return fmt.Errorf("cache: record %d fails its checksum, after block %d; "+
+				"the file changed underneath this run", i, prev)
 		}
 
 		if err := fn(r); err != nil {
 			return err
 		}
+
+		prev = r.BlockNumber
 	}
 
 	return nil

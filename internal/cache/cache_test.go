@@ -301,3 +301,23 @@ func TestDir_IsUnderTheXDGCacheHome(t *testing.T) {
 		t.Errorf("Dir = %q, want %q", dir, want)
 	}
 }
+
+func TestAppend_IsAllOrNothing(t *testing.T) {
+	t.Parallel()
+
+	// A batch with a bad record in the middle writes nothing: a chunk half-appended would
+	// end inside a block, and Sync resumes after the last held block.
+	c := open(t, t.TempDir(), identity())
+	bad := transfer(1001, alice, bob, 0)
+	bad.Value = nil
+
+	if err := c.Append([]cache.Record{transfer(1000, alice, bob, 1), bad}); err == nil {
+		t.Fatal("Append = nil error with a nil value in the batch")
+	}
+	if c.Len() != 0 {
+		t.Errorf("%d records after a refused batch, want 0", c.Len())
+	}
+	if _, ok := c.Last(); ok {
+		t.Error("Last is set after a refused batch")
+	}
+}

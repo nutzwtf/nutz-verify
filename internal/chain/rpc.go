@@ -196,12 +196,16 @@ func (e *endpoint) callBatch(ctx context.Context, method string, params [][]any)
 
 	raw, err := e.roundTrip(ctx, method+" batch", body, len(requests))
 	if err != nil {
-		var retry *retryable
-		if errors.As(err, &retry) {
-			return nil, err // it was retried and still refused; that is not "no batches"
+		// Only a status the endpoint chose says anything about batches. A rate limit was
+		// retried and still refused, which is not "no batches"; a cancelled context or a
+		// dropped connection says nothing about them at all, and treating either as a
+		// refusal would turn one blip into every later read paying a request per header.
+		var status *httpFailure
+		if errors.As(err, &status) {
+			return nil, &batchRefused{err: err}
 		}
 
-		return nil, &batchRefused{err: err}
+		return nil, err
 	}
 
 	var replies []rpcResponse
@@ -296,6 +300,17 @@ func (e *endpoint) roundTrip(ctx context.Context, what string, body []byte, call
 	return nil, fmt.Errorf("%s: gave up after %d attempts: %w", what, maxAttempts, lastErr)
 }
 
+// httpFailure is an HTTP status that is neither success nor worth retrying: the endpoint
+// answered, and the answer was no. Carried as a type so a batch refused this way can be
+// told from a transport failure.
+type httpFailure struct {
+	status int
+	err    error
+}
+
+func (h *httpFailure) Error() string { return h.err.Error() }
+func (h *httpFailure) Unwrap() error { return h.err }
+
 // retryable is an endpoint that is up and refusing for a reason that may pass: a rate limit,
 // or a gateway that is briefly unwell. It is distinguished from every other failure because
 // those do not improve by being asked again — a bad key and an unsupported method would just
@@ -334,7 +349,7 @@ func (e *endpoint) attempt(ctx context.Context, what string, body []byte) ([]byt
 			return nil, &retryable{status: resp.StatusCode, after: retryAfter(resp), err: failure}
 		}
 
-		return nil, failure
+		return nil, &httpFailure{status: resp.StatusCode, err: failure}
 	}
 
 	raw, err := io.ReadAll(limited)

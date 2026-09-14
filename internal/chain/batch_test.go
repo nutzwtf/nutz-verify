@@ -1,6 +1,7 @@
 package chain
 
 import (
+	"context"
 	"net/http"
 	"slices"
 	"testing"
@@ -231,5 +232,32 @@ func TestNew_RefusesANegativeRate(t *testing.T) {
 	if _, err := New(Config{Endpoints: []string{"http://localhost:8545"}, Token: nutz, Distributor: distributor,
 		CallsPerSecond: -1}); err == nil {
 		t.Error("New = nil error for a negative rate")
+	}
+}
+
+func TestTimestamps_ATransportFailureDoesNotDisableBatches(t *testing.T) {
+	t.Parallel()
+
+	// A dropped connection says nothing about whether the endpoint batches. Latching
+	// "no batches" on it would make every later read pay a request per header.
+	node := newFakeNode(20, 15)
+	url := node.serve(t)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	r, err := New(Config{Endpoints: []string{url}, Token: nutz, Distributor: distributor, CallsPerSecond: unpaced})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Timestamps(ctx, []uint64{3, 7}); err == nil {
+		t.Fatal("Timestamps = nil error under a cancelled context")
+	}
+
+	if _, err := r.Timestamps(t.Context(), []uint64{3, 7}); err != nil {
+		t.Fatalf("Timestamps = %v", err)
+	}
+	if batches := node.seenBatches(); len(batches) != 1 {
+		t.Errorf("batches seen = %v, want the one after the cancelled attempt", batches)
 	}
 }

@@ -102,6 +102,34 @@ file byte-identical to a `--fresh` sync of the same history.
   readers pass `CallsPerSecond: unpaced` so the chain suite stays at ~13 s. The live tests keep the
   default, which is the point of them.
 
+### Fixed in review
+
+Both axes independently flagged the first, which is usually the sign it is real.
+
+- **A repair cut inside a block lost the rest of that block for good.** Truncate-to-last-valid-
+  *record* is what the ticket says, and it is wrong by one block: a checkpoint falls wherever
+  10,000 records fall, so a torn tail lands mid-block at USDG's density almost every time, and
+  `Sync` resumes after the last held block. The good records of the damaged block were kept and
+  its remaining transfers never refetched — a confident wrong answer of exactly the kind the CRC
+  exists to prevent, and the one-record-per-block test could not see it. A repair now cuts back to
+  the start of the block the damage fell in, `Repair` says so, and `Append` is all-or-nothing so a
+  refused chunk cannot leave a block half-held either. Spec §9's "truncate-to-last-valid-record"
+  should be read as "to the last whole valid block"; the test that pins it tears a block in half.
+- **A dropped connection permanently disabled batching.** Any non-retryable failure of a batch
+  request counted as "this endpoint does not batch", including a cancelled context or a reset
+  connection, after which every read paid a request per header for the rest of the run — twenty
+  times the calls at fifteen a second. Only an HTTP status the endpoint chose, or a single error
+  object in reply to an array, counts now.
+- A file shorter than a header — a crash during a fresh cache's first write — opens empty with a
+  note rather than sending the user to `--fresh` for a file that never held anything.
+- The request breakdown recorded in spec §9 was written by hand and wrong: five `eth_getLogs`
+  pages, not three. `Each`'s checksum error named the newest block rather than the one before the
+  damage. `Sync`'s doc claimed whole chunks were on disk after a failure; they are in the Cache,
+  and on disk at the next checkpoint or Close.
+- **Declined:** dropping `lock_other.go` (eight lines that keep `go vet` honest on a GOOS spec §3
+  does not ship); unifying `scan` and `Each`'s read loops (they differ in exactly the part that
+  matters, what a bad record means).
+
 ### Follow-ups, not done here
 
 - **`--rate` for ticket 05**, with the default printed in the run header (noted in 05).

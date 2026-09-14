@@ -149,7 +149,9 @@ type Config struct {
 	// provider allows more and a user with one raises it.
 	CallsPerSecond float64
 
-	// HTTPClient and Concurrency are optional.
+	// HTTPClient is optional. Concurrency is how many header batches are in flight at once;
+	// zero is a default that covers one request's latency, which is all the pace leaves
+	// room for.
 	HTTPClient  *http.Client
 	Concurrency int
 }
@@ -829,10 +831,6 @@ func (e *endpoint) blockByTag(ctx context.Context, tag string) (Block, error) {
 
 // blocksByNumber reads the headers of numbers, in one batch where the endpoint allows it
 // and one at a time where it has said it does not.
-//
-// Every header is checked to be the block that was asked for. Replies are already matched
-// by id, but the id says which question was answered, not that the answer is the block the
-// question named.
 func (e *endpoint) blocksByNumber(ctx context.Context, numbers []uint64) ([]Block, error) {
 	if !e.noBatch.Load() {
 		blocks, err := e.batchBlocks(ctx, numbers)
@@ -851,14 +849,24 @@ func (e *endpoint) blocksByNumber(ctx context.Context, numbers []uint64) ([]Bloc
 		if err != nil {
 			return nil, err
 		}
-		if block.Number != n {
-			return nil, fmt.Errorf("chain: asked for block %d and was given block %d", n, block.Number)
+		if err := isBlock(block, n); err != nil {
+			return nil, err
 		}
 
 		out = append(out, block)
 	}
 
 	return out, nil
+}
+
+// isBlock checks a header is the block that was asked for. The reply's id says which
+// question was answered, not that the answer is the block the question named.
+func isBlock(block Block, asked uint64) error {
+	if block.Number != asked {
+		return fmt.Errorf("chain: asked for block %d and was given block %d", asked, block.Number)
+	}
+
+	return nil
 }
 
 func (e *endpoint) batchBlocks(ctx context.Context, numbers []uint64) ([]Block, error) {
@@ -883,8 +891,8 @@ func (e *endpoint) batchBlocks(ctx context.Context, numbers []uint64) ([]Block, 
 		if err != nil {
 			return nil, fmt.Errorf("eth_getBlockByNumber %d: %w", numbers[i], err)
 		}
-		if block.Number != numbers[i] {
-			return nil, fmt.Errorf("chain: asked for block %d and was given block %d", numbers[i], block.Number)
+		if err := isBlock(block, numbers[i]); err != nil {
+			return nil, err
 		}
 
 		out = append(out, block)
