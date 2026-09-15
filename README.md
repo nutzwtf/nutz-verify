@@ -38,7 +38,7 @@ fine" ([ADR-0002](docs/adr/0002-rpc-only-and-what-match-asserts.md)).
 | `--finality latest\|safe\|finalized` | which tip history is read at; default `safe` |
 | `--rate <n>` | JSON-RPC calls per second per endpoint; default 15, the public endpoint's budget. A keyed provider allows far more |
 | `--fresh` | discard the Cache and rebuild it (the remedy for a Cache built for another history) |
-| `--chain` | assert the full Carry chain back to deploy, not just the previous Epoch; slow |
+| `--chain` | assert the full Carry chain back to deploy, not just the previous Epoch. The history is replayed once however many Epochs that is; the cost is the `RootPosted` read from deploy and a Root per rooted Epoch |
 | `--artifacts <dir>` | a published `epochs/<id>/` bundle to diff against the Recompute; it can never influence one |
 | `--json` | one JSON document, schema `nutz-verify-report/1`; the Signer's interface |
 

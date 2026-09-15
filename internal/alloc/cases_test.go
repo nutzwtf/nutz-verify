@@ -347,3 +347,60 @@ func decodeHex(t *testing.T, s string, into []byte) {
 
 	copy(into, b)
 }
+
+// Ticket 07: the incremental Ledger is what --chain walks the Carry chain with, and its
+// entire correctness claim is that it agrees with Replay. Advanced from Epoch 0 through the
+// Case's Epoch, it must hand Allocate byte-identical Holders — and so the same Recompute —
+// as Compute's Replay does, on every Case there is.
+func TestCases_LedgerAgreesWithReplay(t *testing.T) {
+	t.Parallel()
+
+	for _, path := range casePaths(t) {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			t.Parallel()
+
+			c := loadCase(t, path)
+			params := c.params(t)
+			want := fingerprint(compute(t, params))
+
+			ledger := twab.NewLedger(params.Transfers, params.Exclusions)
+			for epoch := uint64(0); epoch <= params.EpochID; epoch++ {
+				replayed, err := twab.Replay(epoch, params.Transfers, params.Exclusions)
+				if err != nil {
+					t.Fatalf("Replay(%d): %v", epoch, err)
+				}
+
+				holders, err := ledger.Advance(epoch)
+				if err != nil {
+					t.Fatalf("Advance(%d): %v", epoch, err)
+				}
+
+				if got, want := holdersFingerprint(holders), holdersFingerprint(replayed); got != want {
+					t.Fatalf("Epoch %d: the Ledger's Holders differ from Replay's:\n got %s\nwant %s",
+						epoch, got, want)
+				}
+
+				if epoch == params.EpochID {
+					result, err := alloc.Allocate(params, holders)
+					if err != nil {
+						t.Fatalf("Allocate: %v", err)
+					}
+
+					if got := fingerprint(result); got != want {
+						t.Fatalf("Allocate over the Ledger's Holders differs from Compute:\n got %s\nwant %s",
+							got, want)
+					}
+				}
+			}
+		})
+	}
+}
+
+func holdersFingerprint(holders []twab.Holder) string {
+	var b strings.Builder
+	for _, h := range holders {
+		fmt.Fprintf(&b, "%#x:%s:%d:%d ", h.Account, h.TWAB, h.FirstBuyAt, h.LastSellAt)
+	}
+
+	return "[" + strings.TrimSpace(b.String()) + "]"
+}

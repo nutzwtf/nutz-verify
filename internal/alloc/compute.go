@@ -78,12 +78,20 @@ type Result struct {
 
 // Compute recomputes one Epoch. The returned Result shares no mutable state with params.
 func Compute(params Params) (Result, error) {
-	base, err := params.base()
+	holders, err := twab.Replay(params.EpochID, params.Transfers, params.Exclusions)
 	if err != nil {
 		return Result{}, err
 	}
 
-	holders, err := twab.Replay(params.EpochID, params.Transfers, params.Exclusions)
+	return Allocate(params, holders)
+}
+
+// Allocate is Compute over Holders already replayed: what --chain does with the Holders a
+// twab.Ledger emits at each Epoch, rather than paying Replay's walk over the whole history
+// once per Epoch (ticket 07). holders must be the Epoch's, as Replay or Ledger.Advance
+// returns them; params.Transfers and params.Exclusions are not read.
+func Allocate(params Params, holders []twab.Holder) (Result, error) {
+	base, err := params.base()
 	if err != nil {
 		return Result{}, err
 	}

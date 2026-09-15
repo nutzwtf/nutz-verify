@@ -40,7 +40,10 @@ func (v *verifier) epoch(ctx context.Context, id uint64, tip chain.Tip, rep *rep
 	// The Carry the target Epoch should have been posted with is what the previous rooted
 	// Epoch left behind, plus the funding of every Epoch between that was passed over. With
 	// --chain that walk starts at deploy and asserts every link on the way.
-	walk := walker{v: v, history: history, exclusions: exclusions, rep: rep}
+	//
+	// One Ledger for the run: every Recompute the walk makes is of a later Epoch than the
+	// last, so the history is read once however many links there are (ticket 07).
+	walk := walker{v: v, history: twab.NewLedger(history, exclusions), rep: rep}
 
 	var carry chain.Amounts
 	var from string
@@ -190,12 +193,12 @@ func (v *verifier) exclusions(ctx context.Context, through uint64) ([]twab.Exclu
 	return out, nil
 }
 
-// walker carries the Carry forward Epoch by Epoch and assesses each rooted one.
+// walker carries the Carry forward Epoch by Epoch and assesses each rooted one, in
+// ascending order — the order the Ledger emits Holders in.
 type walker struct {
-	v          *verifier
-	history    []twab.Transfer
-	exclusions []twab.Exclusion
-	rep        *report.Report
+	v       *verifier
+	history *twab.Ledger
+	rep     *report.Report
 }
 
 // fromPrevious finds the previous rooted Epoch, recomputes it, and carries its carryOut
@@ -318,14 +321,17 @@ func (w walker) assess(ctx context.Context, id uint64, posted *chain.RootPosted,
 		carryIn = posted.CarryIn
 	}
 
-	result, err := alloc.Compute(alloc.Params{
-		EpochID:    id,
-		Transfers:  w.history,
-		Exclusions: w.exclusions,
-		DevWallet:  twab.Address(w.v.dep.DevWallet),
-		Funded:     alloc.Amounts(ledger.Funded),
-		CarryIn:    alloc.Amounts(carryIn),
-	})
+	holders, err := w.history.Advance(id)
+	if err != nil {
+		return report.Epoch{}, alloc.Result{}, err
+	}
+
+	result, err := alloc.Allocate(alloc.Params{
+		EpochID:   id,
+		DevWallet: twab.Address(w.v.dep.DevWallet),
+		Funded:    alloc.Amounts(ledger.Funded),
+		CarryIn:   alloc.Amounts(carryIn),
+	}, holders)
 	if err != nil {
 		return report.Epoch{}, alloc.Result{}, err
 	}

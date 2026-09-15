@@ -72,14 +72,7 @@ func Replay(epochID uint64, transfers []Transfer, exclusions []Exclusion) ([]Hol
 	window := WindowOf(epochID)
 	excluded := ExcludedAsOf(epochID, exclusions)
 
-	// Ascending by timestamp. Order within a block is immaterial — balance deltas commute,
-	// and a sub-interval of zero length accrues nothing — but the walk has to be ordered
-	// for the accrual to measure real durations.
-	ordered := slices.Clone(transfers)
-	slices.SortStableFunc(ordered, func(a, b Transfer) int {
-		return cmp.Compare(a.Timestamp, b.Timestamp)
-	})
-
+	ordered := sortedByTimestamp(transfers)
 	replay := replayState{window: window, balances: map[Address]*standing{}}
 
 	for i := 0; i < len(ordered); {
@@ -105,6 +98,18 @@ func Replay(epochID uint64, transfers []Transfer, exclusions []Exclusion) ([]Hol
 	}
 
 	return replay.holders(excluded), nil
+}
+
+// sortedByTimestamp is a copy of transfers ascending by timestamp. Order within a block is
+// immaterial — balance deltas commute, and a sub-interval of zero length accrues nothing —
+// but the walk has to be ordered for the accrual to measure real durations.
+func sortedByTimestamp(transfers []Transfer) []Transfer {
+	ordered := slices.Clone(transfers)
+	slices.SortStableFunc(ordered, func(a, b Transfer) int {
+		return cmp.Compare(a.Timestamp, b.Timestamp)
+	})
+
+	return ordered
 }
 
 // ExcludedAsOf is the Excluded set of Epoch epochID: every account whose ExcludedAppended log
@@ -158,15 +163,29 @@ type standing struct {
 	bought     bool
 	firstBuyAt int64
 	lastSellAt int64
+
+	// listed is whether the address is on active: it has held a balance or moved one since
+	// the window opened, so it may have a TWAB to reduce. Replay lists every address it
+	// ever sees; the Ledger takes idle ones off the list at each boundary.
+	listed bool
 }
 
 type replayState struct {
 	window   Window
 	balances map[Address]*standing
 
+	// active is every address that can have a TWAB in the current window, in the order
+	// first listed. holders reduces exactly these, so a Ledger carrying a million wallets
+	// that sold out long ago pays for none of them at a boundary.
+	active []Address
+
 	// moved is the addresses touched by the block being applied, so settle judges those
 	// rather than re-walking every balance once per block.
 	moved []Address
+
+	// scratch is the product a sub-interval accrues, reused so a walk over N transfers
+	// does not allocate N big.Ints it drops at once.
+	scratch big.Int
 }
 
 func (r *replayState) apply(tr Transfer) error {
@@ -179,7 +198,7 @@ func (r *replayState) apply(tr Transfer) error {
 
 	if tr.From != zeroAddress {
 		from := r.at(tr.From)
-		from.accrueTo(tr.Timestamp)
+		from.accrueTo(tr.Timestamp, &r.scratch)
 		from.balance.Sub(from.balance, tr.Value)
 
 		// Any outgoing transfer is a sell, and the walk is ascending, so the last one wins.
@@ -190,7 +209,7 @@ func (r *replayState) apply(tr Transfer) error {
 
 	if tr.To != zeroAddress {
 		to := r.at(tr.To)
-		to.accrueTo(tr.Timestamp)
+		to.accrueTo(tr.Timestamp, &r.scratch)
 		to.balance.Add(to.balance, tr.Value)
 
 		if !to.bought {
@@ -218,11 +237,21 @@ func (r *replayState) settle(ts int64) error {
 }
 
 // at is the address's standing, created holding nothing since the Epoch opened.
+//
+// An existing standing that is not listed has been idle — holding nothing, accruing
+// nothing — since some earlier window, and its since is that window's. It rejoins at the
+// current window's opening, like a new one: time before the window belongs to no
+// sub-interval of it, and its balance is zero anyway.
 func (r *replayState) at(a Address) *standing {
 	s, ok := r.balances[a]
 	if !ok {
-		s = &standing{balance: new(big.Int), since: r.window.Start, weighted: new(big.Int)}
+		s = &standing{balance: new(big.Int), weighted: new(big.Int)}
 		r.balances[a] = s
+	}
+
+	if !s.listed {
+		s.listed, s.since = true, r.window.Start
+		r.active = append(r.active, a)
 	}
 
 	return s
@@ -231,28 +260,30 @@ func (r *replayState) at(a Address) *standing {
 // accrueTo closes the sub-interval ending at ts. A transfer before the Epoch opened moves
 // the balance without accruing anything, and a second transfer in the same block closes a
 // sub-interval of zero length.
-func (s *standing) accrueTo(ts int64) {
+func (s *standing) accrueTo(ts int64, scratch *big.Int) {
 	if ts <= s.since {
 		return
 	}
 
-	s.weighted.Add(s.weighted, new(big.Int).Mul(s.balance, big.NewInt(ts-s.since)))
+	scratch.SetInt64(ts - s.since)
+	s.weighted.Add(s.weighted, scratch.Mul(scratch, s.balance))
 	s.since = ts
 }
 
 // holders closes every open sub-interval at the Epoch boundary and divides once.
 func (r *replayState) holders(excluded []Address) []Holder {
-	out := make([]Holder, 0, len(r.balances))
+	out := make([]Holder, 0, len(r.active))
 	divisor := big.NewInt(EpochSeconds)
 
-	for account, s := range r.balances {
+	for _, account := range r.active {
 		if _, found := slices.BinarySearchFunc(excluded, account, compareAddresses); found {
 			continue
 		}
 
 		// Spec §5: the final sub-interval runs to the Epoch's closing instant, not to the
 		// timestamp of its last block.
-		s.accrueTo(r.window.End)
+		s := r.balances[account]
+		s.accrueTo(r.window.End, &r.scratch)
 
 		// One division, over the whole sum. Dividing per sub-interval would lose precision
 		// in proportion to the number of transfers, so two wallets holding identically over
@@ -270,8 +301,8 @@ func (r *replayState) holders(excluded []Address) []Holder {
 		})
 	}
 
-	// Map iteration is randomised; the Root is not. Ascending by address, which is also the
-	// order the Cases record allocations in.
+	// active is in first-seen order, which is an accident of the history; the Root is not.
+	// Ascending by address, which is also the order the Cases record allocations in.
 	slices.SortFunc(out, func(a, b Holder) int {
 		return bytes.Compare(a.Account[:], b.Account[:])
 	})
