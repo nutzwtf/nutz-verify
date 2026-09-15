@@ -85,3 +85,16 @@ minutes. Four consecutive forked runs at ~19 s each.
 secret on `nutz-contracts`; the same value is set here by `scripts/wizard-first-release.sh`,
 which also pushes `main`, watches the first CI run, and cuts `v0.1.0`. Nothing on GitHub had run
 before that: `main` was 18 commits ahead of `origin` and no workflow run or tag existed.
+
+**2026-09-15, first run on GitHub (35017880822), red twice.** Both go the ticket's way, neither
+was visible from a machine where go is already 1.26.8. (1) `setup-go`'s `go-version-file`
+reads only the `go` line, not `toolchain` — ticket 06's "setup-go installs the toolchain line"
+was an assumption, and the log says `Setup go version spec 1.24.0`. A 1.24 go on PATH builds
+`go run staticcheck@…` in module-less mode with 1.24, then the repo's `go list` switches to
+1.26.8, whose stdlib staticcheck cannot parse. Fixed: every setup-go now takes the version read
+from the toolchain line by a one-line step, in both workflows. (2) The harness checks out
+nutz-contracts' *GitHub* main, which was at 410b143 while the local sibling that made the
+harness pass was 40 commits ahead (and 6 behind) — the base-list-at-construction change
+(1d29036) had never been pushed, so the fork saw one `ExcludedAppended` instead of three. Not a
+bug here; nutz-contracts has to be pushed before this harness can be green, and the checkout
+comment now says so.

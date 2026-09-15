@@ -28,12 +28,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # go.mod, not the newest release. Its `toolchain` line is what releases are built with
-      # (scripts/build-release.sh pins it), a supported, patched version; its `go` line stays
+      # go.mod's `toolchain` line, not the newest release: it is what releases are built with
+      # (scripts/build-release.sh pins it), a supported, patched version; the `go` line stays
       # the conservative minimum spec §3 wants so a distro toolchain builds the Verifier.
-      # setup-go installs the toolchain line, so this job tests the release toolchain.
+      # setup-go's go-version-file reads only the `go` line (the first run proved it: "Setup
+      # go version spec 1.24.0"), and a 1.24 go on PATH builds `go run staticcheck@...` in
+      # module-less mode with 1.24 while the repo's `go list` switches to 1.26, which
+      # staticcheck cannot parse. So the version is read from the toolchain line by hand.
+      - id: go
+        run: echo "toolchain=$(sed -n 's/^toolchain go//p' go.mod)" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@v5
-        with: { go-version-file: go.mod }
+        with: { go-version: "${{ steps.go.outputs.toolchain }}" }
       - run: go build ./...
       - run: go vet ./...
       - run: go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./...
@@ -72,8 +77,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - id: go
+        run: echo "toolchain=$(sed -n 's/^toolchain go//p' go.mod)" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@v5
-        with: { go-version-file: go.mod }
+        with: { go-version: "${{ steps.go.outputs.toolchain }}" }
       # The release recipe on every push: CGO_ENABLED=0, all four targets, the settings
       # read back from each binary. A package that quietly needs cgo, or a change that
       # drops -trimpath, fails here rather than at the tag. Reproducibility across two
@@ -89,6 +96,11 @@ jobs:
       # artifacts. Checked out inside the workspace because actions/checkout refuses paths
       # outside it; NUTZ_CONTRACTS points the harness at it. nutz-contracts is public, so
       # the default token reads it; no secret is needed anywhere in this job.
+      #
+      # This tracks nutz-contracts' main, so a Distributor change shows up here on the next
+      # push rather than when someone remembers to bump a pin. The cost is that the two
+      # repos must be pushed in step: the base-list assertions need nutz-contracts 1d29036
+      # (2026-09-14, "base list emitted at construction") or later.
       - uses: actions/checkout@v4
         with:
           repository: nutzwtf/nutz-contracts
@@ -98,8 +110,10 @@ jobs:
         with: { version: v1.8.1 }       # pinned to nutz-contracts' .mise.toml and its own CI
       - run: forge build
         working-directory: nutz-contracts
+      - id: go
+        run: echo "toolchain=$(sed -n 's/^toolchain go//p' go.mod)" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@v5
-        with: { go-version-file: go.mod }
+        with: { go-version: "${{ steps.go.outputs.toolchain }}" }
       # Both REQUIRE_* set: no secret is needed to fork 4663, so there is no reason to let
       # this degrade to a bare node or to skip.
       - name: every decoder against a fork of 4663
@@ -116,8 +130,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - id: go
+        run: echo "toolchain=$(sed -n 's/^toolchain go//p' go.mod)" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@v5
-        with: { go-version-file: go.mod }
+        with: { go-version: "${{ steps.go.outputs.toolchain }}" }
       # RPC_4663 is a Chainstack archive endpoint. Without it this still exercises the paging
       # against the public endpoint's real 10,000-result cap; with it, the two are compared
       # byte for byte, which is the only test ADR-0002's cross-check has that is not one node

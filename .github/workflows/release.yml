@@ -31,8 +31,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - id: go
+        run: echo "toolchain=$(sed -n 's/^toolchain go//p' go.mod)" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@v5
-        with: { go-version-file: go.mod }
+        with: { go-version: "${{ steps.go.outputs.toolchain }}" }
       - run: scripts/build-release.sh dist
       - uses: actions/upload-artifact@v4
         with:
@@ -61,8 +63,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with: { name: dist-ubuntu-latest, path: dist }
+      - id: go
+        run: echo "toolchain=$(sed -n 's/^toolchain go//p' go.mod)" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@v5
-        with: { go-version-file: go.mod }
+        with: { go-version: "${{ steps.go.outputs.toolchain }}" }
       # The notes carry everything a reproducer needs that the binary does not: the commit,
       # the toolchain, and the fact that two machines agreed. The toolchain is read from the
       # binary being published, not from go.mod. A release that already exists is not
