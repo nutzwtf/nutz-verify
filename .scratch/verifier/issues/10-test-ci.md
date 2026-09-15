@@ -70,10 +70,18 @@ minutes. Four consecutive forked runs at ~19 s each.
 
 ## Not done here
 
-- `CONTRACTS_TOKEN` is referenced with a `github.token` fallback, so this works whether or not
-  `nutz-contracts` is private. If it is private, add the secret; if it is public, delete the `token:`
-  lines. Unverified from this machine.
+- ~~`CONTRACTS_TOKEN` is referenced with a `github.token` fallback, so this works whether or not
+  `nutz-contracts` is private.~~ Verified 2026-09-15: both repos are public, so the `token:` line
+  is gone and the harness job references no secret at all.
 - `.env.example` documents every variable above, and opens by saying the Verifier itself needs none
   of them.
 - Nothing publishes coverage. `nutz-contracts` uploads an lcov artifact; worth mirroring if anyone
   wants the trend.
+
+## Comments
+
+**2026-09-15.** Checked as `nutz-dev` through `gh`: `nutzwtf/nutz-contracts` is public, so the
+`CONTRACTS_TOKEN` fallback was dead and the `token:` line is deleted. `RPC_4663` was already a
+secret on `nutz-contracts`; the same value is set here by `scripts/wizard-first-release.sh`,
+which also pushes `main`, watches the first CI run, and cuts `v0.1.0`. Nothing on GitHub had run
+before that: `main` was 18 commits ahead of `origin` and no workflow run or tag existed.

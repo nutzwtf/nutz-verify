@@ -87,13 +87,13 @@ jobs:
       - uses: actions/checkout@v4
       # The harness decodes what the real Distributor emits, so it needs that repo's compiled
       # artifacts. Checked out inside the workspace because actions/checkout refuses paths
-      # outside it; NUTZ_CONTRACTS points the harness at it.
+      # outside it; NUTZ_CONTRACTS points the harness at it. nutz-contracts is public, so
+      # the default token reads it; no secret is needed anywhere in this job.
       - uses: actions/checkout@v4
         with:
           repository: nutzwtf/nutz-contracts
           path: nutz-contracts
           submodules: recursive
-          token: ${{ secrets.CONTRACTS_TOKEN || github.token }}
       - uses: foundry-rs/foundry-toolchain@v1
         with: { version: v1.8.1 }       # pinned to nutz-contracts' .mise.toml and its own CI
       - run: forge build
