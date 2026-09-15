@@ -1,6 +1,6 @@
 # 08 — Confirm with `nutz-contracts` which `Transfer` logs reset a streak
 
-Status: ready-for-human
+Status: resolved
 Type: research
 Spec: ../spec.md §5; engineering spec §4.3
 Blocked by: —
@@ -195,3 +195,23 @@ contract PonsTokenProbe is Test {
     }
 }
 ```
+
+## Comments
+
+**2026-09-15 — decided and landed.** Eduar chose option A: a zero-value `Transfer` is ignored in
+both directions; self-transfers of non-zero value reset the streak; a mint is a first buy and
+`firstBuyAt` is now defined. What changed:
+
+- `internal/twab`: `replayState.apply` returns before touching any state when `value == 0`
+  (the Ledger shares it, so `--chain` follows). The two Go tests that pinned the zero-value
+  and self-transfer readings are gone; the three Cases replace them and are in
+  `requiredCases`. Done test-first: the promoted zero-value Case failed against the old code
+  with exactly 250/375/375, then passed with the gate; the other two passed throughout.
+- `testdata/cases/`: `zero-value-transfer-keeps-the-streak`, `self-transfer-resets-the-streak`,
+  `mint-is-a-buy`, with README rows and a line in the `transfers` field description saying
+  a value of 0 is a legitimate no-op entry.
+- `nutz-contracts`: engineering spec §4.3 patched as proposed (v0.5.1, changelog entry),
+  `CONTEXT.md` Streak entry gains "A transfer of zero value is not a transfer for this
+  purpose." No contract changes: the streak is an off-chain rule and the token is Pons's.
+- `nutz-platform`: its copy of the engineering spec synced from v0.4 to v0.5.1.
+- Spec §5 here says the same in one sentence.

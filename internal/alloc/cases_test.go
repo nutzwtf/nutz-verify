@@ -28,13 +28,16 @@ var requiredCases = []string{
 	"dev-wallet-flat",
 	"excluded-holder",
 	"funding-plus-carry",
+	"mint-is-a-buy",
 	"no-eligible-holders",
 	"omission-last",
+	"self-transfer-resets-the-streak",
 	"sell-at-minute-1",
 	"streak-boundaries",
 	"transfers-within-one-hour",
 	"weight-carries-bps",
 	"window-closes-at-the-boundary",
+	"zero-value-transfer-keeps-the-streak",
 }
 
 func TestCases(t *testing.T) {

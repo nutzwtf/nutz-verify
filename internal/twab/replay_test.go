@@ -329,56 +329,6 @@ func TestReplay_RecordsAFirstBuyAtTimestampZero(t *testing.T) {
 	}
 }
 
-// Engineering spec §4.3 says lastSellAt is "the most recent Transfer(from = a), whatever the
-// destination", and a zero-value Transfer is a Transfer: ERC-20 emits one, so it resets the
-// streak. That is the literal reading, and it is not the safe one: on the real token a
-// stranger holding no allowance can emit Transfer(victim, x, 0) through transferFrom, so
-// under this reading anyone can reset any Holder's streak for the price of gas. Ticket 08
-// recommends ignoring zero-value logs in both directions and retiring this test for a Case;
-// until the spec owner confirms, the behaviour stays as §4.3 literally says. It is a reading
-// rather than a §5 resolution, so it is pinned here rather than in a Case: see ticket 02.
-func TestReplay_AZeroValueTransferStillCountsAsASell(t *testing.T) {
-	t.Parallel()
-
-	holders := replay(t, epoch1, []twab.Transfer{
-		mint(100, alice, 1000),
-		send(5400, alice, bob, 0),
-	})
-
-	alice := holderOf(t, holders, alice)
-	if alice.LastSellAt != 5400 {
-		t.Errorf("LastSellAt = %d, want 5400", alice.LastSellAt)
-	}
-	if alice.TWAB.Cmp(big.NewInt(1000)) != 0 {
-		t.Errorf("TWAB = %s, want 1000: a zero-value transfer moves no balance", alice.TWAB)
-	}
-}
-
-// Transfer(a, a, v) is an outgoing Transfer like any other, so it resets the streak: the
-// balance is unchanged and so is the TWAB, but lastSellAt moves. Only the sender, or a
-// spender it approved, can produce this log, so unlike a zero-value transfer it cannot be
-// turned against a stranger (ticket 08). Pinned here rather than in a Case for the same
-// reason as the zero-value reading above.
-func TestReplay_ASelfTransferStillCountsAsASell(t *testing.T) {
-	t.Parallel()
-
-	holders := replay(t, epoch1, []twab.Transfer{
-		mint(100, alice, 1000),
-		send(5400, alice, alice, 1000),
-	})
-
-	alice := holderOf(t, holders, alice)
-	if alice.LastSellAt != 5400 {
-		t.Errorf("LastSellAt = %d, want 5400: a self-transfer is an outgoing transfer", alice.LastSellAt)
-	}
-	if alice.FirstBuyAt != 100 {
-		t.Errorf("FirstBuyAt = %d, want 100: a self-transfer is not a first buy", alice.FirstBuyAt)
-	}
-	if alice.TWAB.Cmp(big.NewInt(1000)) != 0 {
-		t.Errorf("TWAB = %s, want 1000: a self-transfer moves no balance", alice.TWAB)
-	}
-}
-
 // A wallet that receives and forwards inside one block passes through a negative balance in
 // one of the two orders and not the other. Log order within a block is not part of the
 // input — the Cases README promises as much to the private indexer — so neither order may

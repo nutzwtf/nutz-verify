@@ -47,9 +47,10 @@ type Holder struct {
 	// TWAB is floor(Σ balance × duration / 3600) over the Epoch, always positive.
 	TWAB *big.Int
 
-	// FirstBuyAt is the timestamp of the address's first incoming transfer ever, and
-	// LastSellAt that of its most recent outgoing one — whatever the destination, so
-	// wallet-to-wallet moves and burns reset a streak too (engineering spec §4.3).
+	// FirstBuyAt is the timestamp of the address's first incoming transfer of non-zero
+	// value, whatever the source, and LastSellAt that of its most recent outgoing one,
+	// whatever the destination: wallet-to-wallet moves, self-transfers and burns reset a
+	// streak too, and a zero-value transfer touches neither (engineering spec §4.3).
 	// LastSellAt is 0 when the address has never sent; a real block timestamp never is.
 	FirstBuyAt int64
 	LastSellAt int64
@@ -194,6 +195,13 @@ func (r *replayState) apply(tr Transfer) error {
 		return errNilValue
 	case tr.Value.Sign() < 0:
 		return errNegativeValue
+	case tr.Value.Sign() == 0:
+		// A zero-value Transfer moves nothing, so it is neither a sell nor a buy
+		// (engineering spec §4.3). Counting it would be a griefing vector: an ERC-20's
+		// transferFrom spends no allowance for a zero value, so anyone can emit one from
+		// any address and would thereby reset any Holder's streak. Pinned by the Case
+		// zero-value-transfer-keeps-the-streak.
+		return nil
 	}
 
 	if tr.From != zeroAddress {

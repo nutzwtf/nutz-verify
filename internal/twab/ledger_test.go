@@ -32,7 +32,7 @@ func TestLedger_AgreesWithReplayAcrossEpochs(t *testing.T) {
 		send(9000, funder, relay, 300),        // Epoch 2, same block: the relay forwards to Carol
 		send(9000, relay, carol, 300),         //   (order within the block is not part of the input)
 		send(15000, bob, twab.Address{}, 500), // Epoch 4: Bob burns everything
-		send(22000, alice, bob, 0),            // Epoch 6: a zero-value transfer is still a sell
+		send(22000, alice, bob, 0),            // Epoch 6: a zero-value transfer is a no-op, not a sell
 		send(30000, funder, bob, 50),          // Epoch 8: Bob is back
 		send(36000, funder, alice, 1),         // the instant Epoch 10 opens
 	}
