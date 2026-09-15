@@ -199,6 +199,7 @@ GH_USER=nutz-dev
 TAG=v0.1.0
 CONTRACTS_DIR=${NUTZ_CONTRACTS:-../nutz-contracts}
 CHAIN_ID_HEX=0x1237                      # 4663
+VERDICT=""; CHECKSUMS=""                 # stage 6's result, repeated after finish clears the screen
 
 # The git remote is an SSH alias (github-nutz), which gh cannot map to a repository, so
 # every gh command is pointed at the repo explicitly.
@@ -395,10 +396,13 @@ else
   git -c advice.detachedHead=false worktree add -q "$work/src" "$TAG"
   ( cd "$work/src" && scripts/build-release.sh "$work/dist" )
   if diff "$work/dist/SHA256SUMS" "$published"; then
-    printf '  %s✓ MATCH: this machine reproduces every published checksum for %s%s\n' "$GREEN" "$TAG" "$RESET"
-    cat "$published" | sed 's/^/    /'
+    VERDICT="MATCH: this machine reproduces every published checksum for $TAG"
+    printf '  %s✓ %s%s\n' "$GREEN" "$VERDICT" "$RESET"
+    CHECKSUMS=$(sed 's/^/    /' "$published")
+    printf '%s\n' "$CHECKSUMS"
   else
-    warn "MISMATCH: the local build differs from the release. See README 'Reproducing a release'."
+    VERDICT="MISMATCH: the local build of $TAG differs from the release"
+    warn "$VERDICT. See README 'Reproducing a release'."
     SKIPPED+=("diagnose the checksum mismatch on $TAG (toolchain? see scripts/build-release.sh output)")
   fi
   git worktree remove --force "$work/src"
@@ -406,5 +410,8 @@ fi
 rm -rf "$work"
 pause
 
+# finish clears the screen, so the one result worth keeping is repeated after it.
 finish
+[[ -n "${VERDICT:-}" ]] && say "$VERDICT"
+[[ -n "${CHECKSUMS:-}" ]] && printf '%s\n\n' "$CHECKSUMS"
 say "Next: pin one of the published checksums where the warm Signer reads it (README, 'Install')."
