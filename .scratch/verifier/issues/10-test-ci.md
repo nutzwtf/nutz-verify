@@ -98,3 +98,10 @@ harness pass was 40 commits ahead (and 6 behind) — the base-list-at-constructi
 (1d29036) had never been pushed, so the fork saw one `ExcludedAppended` instead of three. Not a
 bug here; nutz-contracts has to be pushed before this harness can be green, and the checkout
 comment now says so.
+
+**2026-09-15, first live tier (35032704167).** Paging survived the real cap and the two
+providers agreed byte for byte on 10,124 logs — the cross-check's first run anywhere but this
+machine. The cache load test then failed on a 429 from the public endpoint at 15,676 records,
+where its siblings in `internal/chain` skip; it now skips on the same signal, logging the rate
+it reached first. `v0.1.0` was cut from 3e90e4e with the release dry run green; two machines
+agreed, and the clean-container check passed on the published assets.

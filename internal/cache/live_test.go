@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -46,6 +47,17 @@ func (c *counting) RoundTrip(r *http.Request) (*http.Response, error) {
 	c.requests.Add(1)
 
 	return c.next.RoundTrip(r)
+}
+
+// throttled mirrors internal/chain's helper of the same name (a _test.go cannot be imported):
+// the endpoint refused us rather than failed, and a third party's quota is not something a
+// test can assert about.
+func throttled(err error) bool {
+	message := err.Error()
+
+	return strings.Contains(message, "429") ||
+		strings.Contains(message, "403") ||
+		strings.Contains(message, "Too Many Requests")
 }
 
 func TestLive_SyncUSDGHistory(t *testing.T) {
@@ -105,6 +117,16 @@ func TestLive_SyncUSDGHistory(t *testing.T) {
 	})
 	elapsed := time.Since(started)
 	if err != nil {
+		// A refusal is the endpoint's budget, not a Sync bug: internal/chain's live tests
+		// skip on the same signal, and the first nightly proved this one has to as well —
+		// the public endpoint answered 429 at 15,676 records. The rate up to that point is
+		// still the measurement, so it is logged before the skip.
+		if throttled(err) {
+			t.Skipf("live: the endpoint is throttling us after %s, %d records, %d requests, "+
+				"so this proves nothing about Sync either way: %v",
+				elapsed.Round(time.Second), c.Len(), transport.requests.Load(), err)
+		}
+
 		t.Fatalf("Sync over %d blocks = %v after %s, %d records, %d requests",
 			span, err, elapsed.Round(time.Second), c.Len(), transport.requests.Load())
 	}
