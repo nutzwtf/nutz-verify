@@ -1,0 +1,92 @@
+{
+  "name": "mint-is-a-buy",
+  "note": "Ticket 08: firstBuyAt is the earliest incoming Transfer of non-zero value, whatever the source, and a mint Transfer(0x0, a, v) is one. Alice is minted 100 and Bob buys 100 from the funder, both at 2,998,800, exactly 7 days before the window closes at 3,603,600, so both hold 1.25x: weights 1,250,000 each, W = 2,500,000, and 1000 splits 500 / 500. If a mint were not a buy, Alice would have no firstBuyAt: read as the 0 sentinel her streak is 41 days and 1.50x, W = 2,750,000 and the split is 545 / 454 with 1 in Carry; read as never having bought she is 1.00x, W = 2,250,000 and the split is 444 / 555 with 1 in Carry. On chain NUTZ has no mint function and its only mint is the launch supply to the curve, an Excluded address, so this Case pins what hermetic fixtures mean by a mint rather than a shape a Holder will see.",
+  "epochId": 1000,
+  "devWallet": "0x0000000000000000000000000000000000000000",
+  "transfers": [
+    {
+      "timestamp": 1,
+      "from": "0x0000000000000000000000000000000000000000",
+      "to": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "value": "1000000"
+    },
+    {
+      "timestamp": 2998800,
+      "from": "0x0000000000000000000000000000000000000000",
+      "to": "0x1111111111111111111111111111111111111111",
+      "value": "100"
+    },
+    {
+      "timestamp": 2998800,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0x2222222222222222222222222222222222222222",
+      "value": "100"
+    }
+  ],
+  "excludedAt": [
+    {
+      "timestamp": 0,
+      "account": "0xcccccccccccccccccccccccccccccccccccccccc"
+    }
+  ],
+  "funded": [
+    "1000",
+    "1000",
+    "1000",
+    "1000",
+    "1000"
+  ],
+  "carryIn": [
+    "0",
+    "0",
+    "0",
+    "0",
+    "0"
+  ],
+  "expected": {
+    "totalWeight": "2500000",
+    "allocations": [
+      {
+        "account": "0x1111111111111111111111111111111111111111",
+        "twab": "100",
+        "multBps": 12500,
+        "weight": "1250000",
+        "amounts": [
+          "500",
+          "500",
+          "500",
+          "500",
+          "500"
+        ]
+      },
+      {
+        "account": "0x2222222222222222222222222222222222222222",
+        "twab": "100",
+        "multBps": 12500,
+        "weight": "1250000",
+        "amounts": [
+          "500",
+          "500",
+          "500",
+          "500",
+          "500"
+        ]
+      }
+    ],
+    "totals": [
+      "1000",
+      "1000",
+      "1000",
+      "1000",
+      "1000"
+    ],
+    "carryOut": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "0"
+    ],
+    "root": "0xcbeb83f8beef37889b97c49e268bcddc59a8fbdf92b426b50999dec52ac77376"
+  }
+}

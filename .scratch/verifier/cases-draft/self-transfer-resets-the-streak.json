@@ -1,0 +1,98 @@
+{
+  "name": "self-transfer-resets-the-streak",
+  "note": "Ticket 08: Transfer(a, a, v) with v > 0 is an outgoing Transfer like any other, so it resets the streak (engineering spec §4.3, whatever the destination). Alice and Bob each bought 100 at 1,011,600, exactly 30 days before the window closes at 3,603,600. At 3,601,800 Alice sends her 100 to herself: her balance is 100 throughout, her TWAB stays 100, but her streak restarts and she is 1.00x while Bob is 1.50x. Weights 1,000,000 / 1,500,000, W = 2,500,000, and 1000 splits 400 / 600. Ignoring a self-transfer as an economic no-op would leave both at 1.50x and split 500 / 500. Only the sender or a spender it approved can produce this log, so unlike a zero-value transfer it cannot be used against a stranger.",
+  "epochId": 1000,
+  "devWallet": "0x0000000000000000000000000000000000000000",
+  "transfers": [
+    {
+      "timestamp": 1,
+      "from": "0x0000000000000000000000000000000000000000",
+      "to": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "value": "1000000"
+    },
+    {
+      "timestamp": 1011600,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0x1111111111111111111111111111111111111111",
+      "value": "100"
+    },
+    {
+      "timestamp": 1011600,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0x2222222222222222222222222222222222222222",
+      "value": "100"
+    },
+    {
+      "timestamp": 3601800,
+      "from": "0x1111111111111111111111111111111111111111",
+      "to": "0x1111111111111111111111111111111111111111",
+      "value": "100"
+    }
+  ],
+  "excludedAt": [
+    {
+      "timestamp": 0,
+      "account": "0xcccccccccccccccccccccccccccccccccccccccc"
+    }
+  ],
+  "funded": [
+    "1000",
+    "1000",
+    "1000",
+    "1000",
+    "1000"
+  ],
+  "carryIn": [
+    "0",
+    "0",
+    "0",
+    "0",
+    "0"
+  ],
+  "expected": {
+    "totalWeight": "2500000",
+    "allocations": [
+      {
+        "account": "0x1111111111111111111111111111111111111111",
+        "twab": "100",
+        "multBps": 10000,
+        "weight": "1000000",
+        "amounts": [
+          "400",
+          "400",
+          "400",
+          "400",
+          "400"
+        ]
+      },
+      {
+        "account": "0x2222222222222222222222222222222222222222",
+        "twab": "100",
+        "multBps": 15000,
+        "weight": "1500000",
+        "amounts": [
+          "600",
+          "600",
+          "600",
+          "600",
+          "600"
+        ]
+      }
+    ],
+    "totals": [
+      "1000",
+      "1000",
+      "1000",
+      "1000",
+      "1000"
+    ],
+    "carryOut": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "0"
+    ],
+    "root": "0xc0a81d6360d1cdc6785ef785875e37c8a1ff705a8076d6def081f6009fc865ca"
+  }
+}

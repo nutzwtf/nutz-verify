@@ -1,0 +1,123 @@
+{
+  "name": "zero-value-transfer-keeps-the-streak",
+  "note": "Ticket 08: a Transfer with value 0 moves nothing, so it is neither a sell nor a buy. Alice and Bob each bought 100 at 1,011,600, exactly 30 days before the window closes at 3,603,600, so both hold 1.50x. Carol received a zero-value Transfer at that same instant and bought 100 as the window opened, so her streak is 0 days and 1.00x. At 3,601,800 a zero-value Transfer(Alice, 0x9999…, 0) lands: on the real token a stranger with no allowance can emit one through transferFrom, so counting it would let anyone reset any Holder's streak for 43k gas. Weights 1,500,000 / 1,500,000 / 1,000,000, W = 4,000,000, and 1000 splits 375 / 375 / 250. Under the literal reading, where a zero-value log counts both ways, Alice drops to 1.00x and Carol's streak starts 30 days early at 1.50x: the same W of 4,000,000 but 250 / 375 / 375. TWABs are unchanged either way, which is the point: nothing moved.",
+  "epochId": 1000,
+  "devWallet": "0x0000000000000000000000000000000000000000",
+  "transfers": [
+    {
+      "timestamp": 1,
+      "from": "0x0000000000000000000000000000000000000000",
+      "to": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "value": "1000000"
+    },
+    {
+      "timestamp": 1011600,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0x1111111111111111111111111111111111111111",
+      "value": "100"
+    },
+    {
+      "timestamp": 1011600,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0x2222222222222222222222222222222222222222",
+      "value": "100"
+    },
+    {
+      "timestamp": 1011600,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0x3333333333333333333333333333333333333333",
+      "value": "0"
+    },
+    {
+      "timestamp": 3600000,
+      "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "to": "0x3333333333333333333333333333333333333333",
+      "value": "100"
+    },
+    {
+      "timestamp": 3601800,
+      "from": "0x1111111111111111111111111111111111111111",
+      "to": "0x9999999999999999999999999999999999999999",
+      "value": "0"
+    }
+  ],
+  "excludedAt": [
+    {
+      "timestamp": 0,
+      "account": "0xcccccccccccccccccccccccccccccccccccccccc"
+    }
+  ],
+  "funded": [
+    "1000",
+    "1000",
+    "1000",
+    "1000",
+    "1000"
+  ],
+  "carryIn": [
+    "0",
+    "0",
+    "0",
+    "0",
+    "0"
+  ],
+  "expected": {
+    "totalWeight": "4000000",
+    "allocations": [
+      {
+        "account": "0x1111111111111111111111111111111111111111",
+        "twab": "100",
+        "multBps": 15000,
+        "weight": "1500000",
+        "amounts": [
+          "375",
+          "375",
+          "375",
+          "375",
+          "375"
+        ]
+      },
+      {
+        "account": "0x2222222222222222222222222222222222222222",
+        "twab": "100",
+        "multBps": 15000,
+        "weight": "1500000",
+        "amounts": [
+          "375",
+          "375",
+          "375",
+          "375",
+          "375"
+        ]
+      },
+      {
+        "account": "0x3333333333333333333333333333333333333333",
+        "twab": "100",
+        "multBps": 10000,
+        "weight": "1000000",
+        "amounts": [
+          "250",
+          "250",
+          "250",
+          "250",
+          "250"
+        ]
+      }
+    ],
+    "totals": [
+      "1000",
+      "1000",
+      "1000",
+      "1000",
+      "1000"
+    ],
+    "carryOut": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "0"
+    ],
+    "root": "0xb1d8d6e308d82dec6e3d1cda7b9f7c44ac37d76a7d127948ee5fa8a3a28694f8"
+  }
+}
