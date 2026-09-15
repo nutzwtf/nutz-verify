@@ -28,13 +28,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # go.mod's directive, not the newest release: spec §3 wants a conservative version so a
-      # distro toolchain builds the Verifier, and that claim is worth failing on.
+      # go.mod, not the newest release. Its `toolchain` line is what releases are built with
+      # (scripts/build-release.sh pins it), a supported, patched version; its `go` line stays
+      # the conservative minimum spec §3 wants so a distro toolchain builds the Verifier.
+      # setup-go installs the toolchain line, so this job tests the release toolchain.
       - uses: actions/setup-go@v5
         with: { go-version-file: go.mod }
       - run: go build ./...
       - run: go vet ./...
       - run: go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./...
+      # ...and the `go` line is still an honest minimum: the same source built by exactly
+      # that version, which the Go command downloads. Only the release is pinned to the
+      # toolchain line; a distro Go this old still builds the Verifier.
+      - name: the go line's version builds it too
+        run: |
+          export GOTOOLCHAIN=go$(awk '/^go /{print $2}' go.mod)
+          go version
+          go build ./... && go vet ./...
       # The anvil harness self-skips here: no foundry, no sibling checkout, and neither
       # NUTZ_VERIFY_REQUIRE_* set. The `harness` job is where it is required to run.
       - run: go test -race ./...
@@ -56,6 +66,19 @@ jobs:
         run: |
           go mod tidy
           git diff --exit-code go.mod go.sum
+
+  release-build:
+    name: every target builds cgo-free
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      # The release recipe on every push: CGO_ENABLED=0, all four targets, the settings
+      # read back from each binary. A package that quietly needs cgo, or a change that
+      # drops -trimpath, fails here rather than at the tag. Reproducibility across two
+      # machines is asserted in release.yml, where it gates publishing.
+      - run: scripts/build-release.sh dist
 
   harness:
     name: harness (fork of 4663)

@@ -1,0 +1,123 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:            # a dry run: builds and compares, publishes nothing
+
+# The published checksums are not cosmetic. The warm Signer of engineering spec §3.2 executes
+# this binary and pins it by checksum, so the checksum is the link between "the code gating
+# our signature" and "the code you can audit". Two things make that link checkable:
+#
+#   reproducible   two machines with different host OSes build the tag independently and
+#                  must produce identical SHA256SUMS before anything is published. This is
+#                  what -trimpath, -buildvcs=false and the toolchain pin buy, asserted rather
+#                  than assumed; scripts/build-release.sh is the whole recipe, so a stranger
+#                  runs the same script and gets the same bytes.
+#   verify         after publishing, the release's own assets are downloaded and checked in a
+#                  clean container with nothing but busybox: the checksums verify and the
+#                  static binary runs.
+#
+# No goreleaser: the build is four `go build` lines, and a release tool would be one more
+# thing a reproducer has to install and trust.
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - run: scripts/build-release.sh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.os }}
+          path: dist/
+          if-no-files-found: error
+
+  reproducible:
+    name: two machines agree on every checksum
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { pattern: dist-*, path: builds }
+      - run: |
+          diff builds/dist-ubuntu-latest/SHA256SUMS builds/dist-macos-latest/SHA256SUMS
+          cat builds/dist-ubuntu-latest/SHA256SUMS
+
+  publish:
+    if: github.event_name == 'push'     # a dispatch on a tag ref is still a dry run
+    needs: reproducible
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: dist-ubuntu-latest, path: dist }
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      # The notes carry everything a reproducer needs that the binary does not: the commit,
+      # the toolchain, and the fact that two machines agreed. The toolchain is read from the
+      # binary being published, not from go.mod. A release that already exists is not
+      # replaced — a checksum that has been pinned must not change under it.
+      - name: publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          toolchain=$(go version -m dist/nutz-verify_linux_amd64 | head -1 | awk '{print $2}')
+          cat >notes.md <<EOF
+          Built from \`$GITHUB_SHA\` by \`scripts/build-release.sh\` with $toolchain:
+          \`CGO_ENABLED=0 go build -trimpath -buildvcs=false\`, cross-compiled to linux and
+          darwin on amd64 and arm64. Two machines (ubuntu-latest and macos-latest) built this
+          tag independently and produced identical checksums; a release is not published
+          otherwise.
+
+          Check a download before running it:
+
+              sha256sum -c SHA256SUMS --ignore-missing
+
+          Reproduce the checksums from source:
+
+              git checkout $GITHUB_REF_NAME
+              scripts/build-release.sh
+              diff dist/SHA256SUMS <(curl -sL https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/SHA256SUMS)
+
+          The warm Signer pins this binary by checksum, not by path; see the README.
+          EOF
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "$GITHUB_REF_NAME" --notes-file notes.md
+
+  verify:
+    name: the published checksums verify in a clean container
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      # Downloaded from the release itself, not from the build artifact, so what is checked
+      # is what a stranger gets. gh handles a private repository; the container never
+      # needs a credential.
+      - name: download the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release download "$GITHUB_REF_NAME" -D release
+          chmod +x release/nutz-verify_*
+      # Alpine: musl, busybox, no libc the binary could have linked against. A cgo-free
+      # static binary runs; anything else does not. No arguments is a usage error, exit 2,
+      # which is enough to prove the binary executes without asserting anything about a
+      # chain this job cannot reach.
+      - name: verify and run
+        run: |
+          docker run --rm -v "$PWD/release:/release:ro" alpine:3.22 sh -ec '
+            cd /release
+            sha256sum -c SHA256SUMS
+            set +e; out=$(./nutz-verify_linux_amd64 2>&1); status=$?; set -e
+            echo "$out"
+            [ "$status" -eq 2 ] && echo "$out" | grep -q "^usage:"
+          '
