@@ -771,3 +771,56 @@ func TestTooBig(t *testing.T) {
 		}
 	}
 }
+
+func TestLogs_TheDistributorsStreamsOpenWide(t *testing.T) {
+	t.Parallel()
+
+	// The Distributor emits a log an hour, and its whole history is asked for on every run.
+	// Paged at MaxLogRange over months of a 460,000-block day that is thousands of requests
+	// for a few hundred logs, which does not fit inside a Dispute window at fifteen calls a
+	// second. The public endpoint accepts a range of a million blocks (spec §4), so the
+	// sparse streams open at SparseLogRange and only narrow when an endpoint refuses.
+	node := newFakeNode(5001, 1)
+	node.rangeCap = SparseLogRange
+	node.addRoot(4500, 0, distributor, KindEpoch, 1, Hash{1}, amountsOf(1, 1, 1, 1, 1), amountsOf(0, 0, 0, 0, 0))
+	node.addExclusion(10, 0, distributor, alice)
+	r := readerOver(t, node)
+
+	roots, err := r.Roots(t.Context(), 0, 5000)
+	if err != nil {
+		t.Fatalf("Roots = %v", err)
+	}
+	if len(roots) != 1 || roots[0].ID != 1 {
+		t.Fatalf("roots = %+v, want the one at block 4500", roots)
+	}
+
+	exclusions, err := r.Exclusions(t.Context(), 0, 5000)
+	if err != nil {
+		t.Fatalf("Exclusions = %v", err)
+	}
+	if len(exclusions) != 1 || exclusions[0].Account != alice {
+		t.Fatalf("exclusions = %+v, want alice", exclusions)
+	}
+
+	if got, want := node.seenRanges(), []string{"0..5000", "0..5000"}; !slices.Equal(got, want) {
+		t.Errorf("ranges = %v, want one page per stream %v", got, want)
+	}
+}
+
+func TestLogs_TheDistributorsStreamsNarrowWhenRefused(t *testing.T) {
+	t.Parallel()
+
+	// A provider with a range cap refuses the wide page; the stream halves down to it and
+	// still returns everything, so a Verifier pointed at such a provider is slower, not wrong.
+	node := newFakeNode(5001, 1)
+	node.rangeCap = 4000
+	node.addRoot(4500, 0, distributor, KindEpoch, 1, Hash{1}, amountsOf(1, 1, 1, 1, 1), amountsOf(0, 0, 0, 0, 0))
+
+	roots, err := readerOver(t, node).Roots(t.Context(), 0, 5000)
+	if err != nil {
+		t.Fatalf("Roots = %v", err)
+	}
+	if len(roots) != 1 {
+		t.Fatalf("got %d roots, want 1", len(roots))
+	}
+}

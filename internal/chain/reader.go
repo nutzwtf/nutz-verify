@@ -32,6 +32,18 @@ import (
 // queries inside a cap nobody publishes.
 const MaxLogRange = 2000
 
+// SparseLogRange is the widest block range one eth_getLogs asks for over the Distributor's
+// own streams, RootPosted and ExcludedAppended.
+//
+// Those carry a log an hour at most and are read from the Distributor's deploy block on
+// every run. Paged at MaxLogRange over a 460,000-block day that is over two hundred requests
+// a day of history for a handful of logs — thousands of requests after a month, which at
+// fifteen calls a second does not fit inside a Dispute window. The public endpoint accepts a
+// range of a million blocks (spec §4, measured 2026-09-14); what it caps is results, and a
+// sparse stream never reaches that. A provider with a range cap refuses the page and the
+// Reader halves down to it, paying a few refused requests rather than a wrong answer.
+const SparseLogRange = 1_000_000
+
 // HeaderBatch is how many block headers one request asks for.
 //
 // A log carries no timestamp, so every block that produced one needs its header, and on
@@ -354,7 +366,7 @@ func (r *Reader) Timestamps(ctx context.Context, blocks []uint64) (map[uint64]in
 // Transfers is every NUTZ Transfer log in the inclusive block range, timestamped, in
 // (block, index) order.
 func (r *Reader) Transfers(ctx context.Context, from, to uint64) ([]Transfer, error) {
-	logs, err := r.logs(ctx, r.token, topicTransfer, from, to)
+	logs, err := r.logs(ctx, r.token, topicTransfer, from, to, MaxLogRange)
 	if err != nil {
 		return nil, err
 	}
@@ -382,7 +394,7 @@ func (r *Reader) Transfers(ctx context.Context, from, to uint64) ([]Transfer, er
 // Epoch that is cannot be known here. The Distributor's constructor emits one of these per
 // base entry, so a range starting at its deploy block yields the whole history.
 func (r *Reader) Exclusions(ctx context.Context, from, to uint64) ([]Exclusion, error) {
-	logs, err := r.logs(ctx, r.distributor, topicExcludedAppended, from, to)
+	logs, err := r.logs(ctx, r.distributor, topicExcludedAppended, from, to, SparseLogRange)
 	if err != nil {
 		return nil, err
 	}
@@ -409,7 +421,7 @@ func (r *Reader) Exclusions(ctx context.Context, from, to uint64) ([]Exclusion, 
 // Both kinds are returned: they share a topic0 and are told apart by the first indexed
 // argument, so filtering here would cost a second query for nothing.
 func (r *Reader) Roots(ctx context.Context, from, to uint64) ([]RootPosted, error) {
-	logs, err := r.logs(ctx, r.distributor, topicRootPosted, from, to)
+	logs, err := r.logs(ctx, r.distributor, topicRootPosted, from, to, SparseLogRange)
 	if err != nil {
 		return nil, err
 	}
@@ -520,15 +532,14 @@ func (r *Reader) EndBlock(ctx context.Context, epochID uint64, tip Tip) (Block, 
 
 // logs pages eth_getLogs across the range and cross-checks each page.
 //
-// Pages are capped at MaxLogRange because that is the public-RPC cap, and the range is
-// inclusive at both ends because that is what eth_getLogs means by fromBlock and toBlock —
-// an off-by-one here drops a block's transfers and changes every Holder's TWAB.
-func (r *Reader) logs(ctx context.Context, address Address, topic0 Hash, from, to uint64) ([]eventLog, error) {
+// Pages open at span blocks — MaxLogRange for the dense Transfer stream, SparseLogRange for
+// the Distributor's — and narrow when an endpoint refuses. The range is inclusive at both
+// ends because that is what eth_getLogs means by fromBlock and toBlock — an off-by-one here
+// drops a block's transfers and changes every Holder's TWAB.
+func (r *Reader) logs(ctx context.Context, address Address, topic0 Hash, from, to, span uint64) ([]eventLog, error) {
 	if from > to {
 		return nil, fmt.Errorf("chain: block range %d..%d runs backwards", from, to)
 	}
-
-	span := uint64(MaxLogRange)
 
 	var out []eventLog
 	for start := from; ; {

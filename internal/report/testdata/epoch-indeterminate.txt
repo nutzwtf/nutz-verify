@@ -1,0 +1,9 @@
+nutz-verify epoch
+  chain        4663
+  distributor  0x2222222222222222222222222222222222222222
+  token        0x1111111111111111111111111111111111111111
+  dev wallet   0xdddddddddddddddddddddddddddddddddddddddd
+  finality     safe: block 41000 0x4100000000000000000000000000000000000000000000000000000000000000, endpoints within 3 blocks of each other
+  endpoints    endpoint 1 (rpc.example), endpoint 2 (archive.example), at 15 calls/s each
+
+INDETERMINATE: chain: epoch 1000 closes at 3603600, and the safe head is block 41000 at 3603000

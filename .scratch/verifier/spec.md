@@ -73,6 +73,13 @@ Two further properties of that endpoint, both relevant to §9 and §10:
   from-scratch sync of a USDG-dense token is measured in weeks on the public endpoint and the Cache
   is what makes that a one-time cost.
 
+**The Distributor's own streams open wide** (ticket 05). `RootPosted` and `ExcludedAppended`
+are a log an hour at most and are read from the deploy block on every run; paged at 2,000
+blocks over a 460,000-block day that is thousands of requests for a handful of logs, which
+does not fit a Dispute window at 15 calls/s. Those two streams open at `SparseLogRange`
+(1,000,000 blocks, the range the public endpoint was measured to accept) and halve on
+refusal like everything else; the dense `Transfer` stream still opens at 2,000.
+
 Cross-checking two genuinely independent providers works: the public endpoint and a Chainstack
 archive return byte-identical logs over the same range, so the canonical comparison survives real
 differences in formatting and ordering. ADR-0002's mitigation is usable, not just stated.
@@ -102,6 +109,10 @@ OpenZeppelin `StandardMerkleTree` v1.0.8 semantics, normative per ADR-0003. Leaf
 Four Assertions, reported as four lines: Root equality; `totals` equality; the cap `totals[i] <= funded[i] + carryIn[i]`; `carryIn` equality against what the previous Epoch should have left. The full Carry chain back to deploy is `--chain` only.
 
 Verdict is MATCH, MISMATCH or INDETERMINATE. Exit `0`, `1`, `2` respectively. **`2` is not `0`**: the Signer signs only on `0`, and conflating "could not check" with "checked and fine" degrades the 2-of-3 during exactly the RPC outage an attacker would pick.
+
+**What "what the previous Epoch should have left" means** (resolved in ticket 05). The expected `carryIn` of Epoch `e` is the `carryOut` of the **Recompute** of the previous rooted Epoch `p` — run with `p`'s own posted `carryIn`, so one link is asserted — plus the `funded` of every Epoch in `(p, e)`, all of which the contract Skipped and rolled into Carry. With no `p`, the walk starts at the Distributor's deploy Epoch with nothing. `--chain` walks from deploy with the *recomputed* Carry throughout and reports every rooted Epoch. Root and `totals` are always recomputed over the **posted** `carryIn`, so a wrong Carry fails Assertion 4 alone rather than all four.
+
+**No Root, three ways.** A funded Epoch with no Root and no eligible Holders is MATCH whether the Distributor has Skipped it yet or not (§5). Skipped with a Recompute that has a tree is MISMATCH. Not Skipped, no Root, and a Recompute with a tree is INDETERMINATE: "no Root posted yet".
 
 ## 8. CLI
 

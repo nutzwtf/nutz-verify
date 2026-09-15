@@ -96,7 +96,7 @@ func TestLive_PagingSurvivesAResultCap(t *testing.T) {
 	to := tip.Block.Number
 	from := to - liveSpan + 1
 
-	logs, err := r.logs(t.Context(), r.token, topicTransfer, from, to)
+	logs, err := r.logs(t.Context(), r.token, topicTransfer, from, to, MaxLogRange)
 	if err != nil {
 		if throttled(err) {
 			t.Skipf("live: the endpoint is throttling us, so this proves nothing either way: %v", err)
@@ -159,7 +159,7 @@ func TestLive_TwoProvidersAgree(t *testing.T) {
 	to := tip.Block.Number - 100
 	from := to - liveSpan + 1
 
-	logs, err := r.logs(t.Context(), r.token, topicTransfer, from, to)
+	logs, err := r.logs(t.Context(), r.token, topicTransfer, from, to, MaxLogRange)
 	if err != nil {
 		if throttled(err) {
 			t.Skipf("live: an endpoint is throttling us: %v", err)

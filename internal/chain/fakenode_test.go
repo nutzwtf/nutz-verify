@@ -64,6 +64,11 @@ type fakeNode struct {
 	// blocks a query covers, but on how many logs it may match. Zero means unlimited.
 	resultCap int
 
+	// rangeCap is the widest block range one eth_getLogs may cover. Zero is MaxLogRange,
+	// the way engineering spec §4.1 describes the public endpoint; a test that wants the
+	// measured behaviour — a million blocks accepted — raises it.
+	rangeCap uint64
+
 	// missing are block numbers the node answers null for, the way a node does for a block
 	// it has pruned or never had.
 	missing map[uint64]bool
@@ -303,8 +308,13 @@ func (n *fakeNode) getLogs(filter map[string]any) (any, error) {
 	n.ranges = append(n.ranges, fmt.Sprintf("%d..%d", from, to))
 	n.mu.Unlock()
 
-	if to-from+1 > MaxLogRange {
-		return nil, fmt.Errorf("block range is %d, and the cap is %d", to-from+1, MaxLogRange)
+	rangeCap := n.rangeCap
+	if rangeCap == 0 {
+		rangeCap = MaxLogRange
+	}
+	if to-from+1 > rangeCap {
+		// Phrased the way providers with a range cap phrase it, so the Reader narrows.
+		return nil, fmt.Errorf("block range is too wide: %d blocks, and the cap is %d", to-from+1, rangeCap)
 	}
 
 	address := filter["address"].(string)

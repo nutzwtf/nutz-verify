@@ -1,0 +1,25 @@
+nutz-verify epoch
+  chain        4663
+  distributor  0x2222222222222222222222222222222222222222
+  token        0x1111111111111111111111111111111111111111
+  dev wallet   0xdddddddddddddddddddddddddddddddddddddddd
+  finality     safe: block 41000 0x4100000000000000000000000000000000000000000000000000000000000000, endpoints within 3 blocks of each other
+  endpoints    endpoint 1 (rpc.example), endpoint 2 (archive.example), at 15 calls/s each
+  cache        /home/x/.cache/nutz-verify/4663-0x1111111111111111111111111111111111111111: 12345 records through block 40990
+               repaired: a record that fails its checksum at record 12000; kept 11990 records through block 40800 and dropped 10, which the next sync refetches
+               reorg: dropped 4 records from block 40980 on
+               synced: 17 records appended
+
+epoch 1000  window [3600000, 3603600)  end block 40990 0x4000000000000000000000000000000000000000000000000000000000000000
+  holders      2 in the tree, W = 40000
+  recomputed   root 0xa100000000000000000000000000000000000000000000000000000000000000  totals [1125 0 375 0 5]  carryOut [375 0 125 1 2]
+  posted       root 0xa100000000000000000000000000000000000000000000000000000000000000 at block 41003  totals [1125 0 375 0 5]  funded [1000 0 500 1 0]  carryIn [500 0 0 0 7]
+  root     ok    0xa100000000000000000000000000000000000000000000000000000000000000
+  totals   ok    [1125 0 375 0 5]
+  cap      ok    totals <= funded [1000 0 500 1 0] + carryIn [500 0 0 0 7] in every token
+  carryIn  ok    [500 0 0 0 7] = carryOut of epoch 999
+
+artifacts /srv/nutz-artifacts/epochs/1000  2 rows, root.txt 0xa100000000000000000000000000000000000000000000000000000000000000
+               DIFFERS: row 1 (0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2): amounts[2] published 120, recomputed 125
+
+MATCH
