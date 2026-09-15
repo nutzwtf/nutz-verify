@@ -27,7 +27,7 @@ jobs:
   go:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # go.mod's `toolchain` line, not the newest release: it is what releases are built with
       # (scripts/build-release.sh pins it), a supported, patched version; the `go` line stays
       # the conservative minimum spec §3 wants so a distro toolchain builds the Verifier.
@@ -37,7 +37,7 @@ jobs:
       # staticcheck cannot parse. So the version is read from the toolchain line by hand.
       - id: go
         run: echo "toolchain=$(sed -n 's/^toolchain go//p' go.mod)" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with: { go-version: "${{ steps.go.outputs.toolchain }}" }
       - run: go build ./...
       - run: go vet ./...
@@ -76,10 +76,10 @@ jobs:
     name: every target builds cgo-free
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: go
         run: echo "toolchain=$(sed -n 's/^toolchain go//p' go.mod)" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with: { go-version: "${{ steps.go.outputs.toolchain }}" }
       # The release recipe on every push: CGO_ENABLED=0, all four targets, the settings
       # read back from each binary. A package that quietly needs cgo, or a change that
@@ -91,7 +91,7 @@ jobs:
     name: harness (fork of 4663)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # The harness decodes what the real Distributor emits, so it needs that repo's compiled
       # artifacts. Checked out inside the workspace because actions/checkout refuses paths
       # outside it; NUTZ_CONTRACTS points the harness at it. nutz-contracts is public, so
@@ -101,7 +101,7 @@ jobs:
       # push rather than when someone remembers to bump a pin. The cost is that the two
       # repos must be pushed in step: the base-list assertions need nutz-contracts 1d29036
       # (2026-09-14, "base list emitted at construction") or later.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: nutzwtf/nutz-contracts
           path: nutz-contracts
@@ -112,7 +112,7 @@ jobs:
         working-directory: nutz-contracts
       - id: go
         run: echo "toolchain=$(sed -n 's/^toolchain go//p' go.mod)" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with: { go-version: "${{ steps.go.outputs.toolchain }}" }
       # Both REQUIRE_* set: no secret is needed to fork 4663, so there is no reason to let
       # this degrade to a bare node or to skip.
@@ -129,10 +129,10 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: go
         run: echo "toolchain=$(sed -n 's/^toolchain go//p' go.mod)" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with: { go-version: "${{ steps.go.outputs.toolchain }}" }
       # RPC_4663 is a Chainstack archive endpoint. Without it this still exercises the paging
       # against the public endpoint's real 10,000-result cap; with it, the two are compared

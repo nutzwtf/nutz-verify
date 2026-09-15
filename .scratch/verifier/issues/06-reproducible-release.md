@@ -74,3 +74,21 @@ nothing) but no tag has been cut, so the `publish` and `verify` jobs have run on
 Docker rehearsal. There is no `LICENSE` file in the repo, and the spec says MIT; a release
 page without one is odd. A test that a release matches a *source tarball* build (no `.git`)
 is not written; `-buildvcs=false` is what makes it true.
+
+**2026-09-15 — v0.1.0 is cut, from 3e90e4e.** Run 35033170743: ubuntu and macos agreed on every
+checksum, `publish` created the release, and `verify` checked the published assets and ran the
+binary in alpine:3.22. A third machine (the dev box, through `scripts/wizard-first-release.sh`
+stage 6 and again by hand) reproduces all four:
+
+    a13ac0a72d9b400f65ad514ef7201b0d13746af361995ee025896b0fdeb6e974  nutz-verify_linux_amd64
+    74b313059b15caf285ee46c3052bcfe7dbe64f98dff0d4201bca944c44257dad  nutz-verify_linux_arm64
+    0599eca3b2e232591615ded14eeeab958d4a536d8685cde56c1a69b95074c764  nutz-verify_darwin_amd64
+    26287d6ab4b8a9c1de97244fc22bcde97fb64ca82f5a489d7d32fe3266914710  nutz-verify_darwin_arm64
+
+Of the "not done here" list: the `LICENSE` is in (db0f6ee), and `publish` and `verify` have now
+run for real. Still open: the source-tarball reproduction test. **The pin has nowhere to live
+yet**: the cold-signer service that runs this binary (engineering spec §5, step 3) is not built —
+`nutz-platform` is a first commit with docs — so the linux_amd64 line above is the value that
+service must carry when it exists, and the README's Install section says how it must treat it.
+Two things this ticket assumed and the first real run corrected are in ticket 10's comments:
+setup-go does not read the `toolchain` line, and the load test now skips on throttling.
