@@ -3,6 +3,37 @@
 Recomputes any NUTZ Epoch from public chain data and reports a Verdict against the on-chain
 Root. Nothing we publish is an input: every number comes from the RPC endpoints you name.
 
+## What it is for
+
+nutz-verify is an independent checker for the NUTZ payout math.
+
+Every hour, the platform's indexer works out how much each Holder is owed for that Epoch,
+builds a Merkle tree of those Allocations, and posts its Root to the Distributor contract.
+A Holder then claims by proving their leaf against that Root. The contract cannot tell a right
+Root from a wrong one: if the indexer is buggy or compromised, it can post a Root that
+misdirects an Epoch's rewards, and the chain will accept it.
+
+This binary closes that gap. It takes nothing but an RPC endpoint, reads the raw history
+itself (transfers, exclusions, funding, posted Roots), recomputes the Allocations and the Root
+from the published rules, and prints `MATCH` or `MISMATCH` against what is on-chain. Three
+audiences rely on that:
+
+- **The second Signer.** A Root needs 2-of-3 signatures, and one Signer signs only after
+  running nutz-verify and seeing `MATCH`, so the indexer cannot post a bad Root alone. That is
+  why the binary's checksum has to be pinned (below): swapping the binary on that host is the
+  cheapest attack on the whole arrangement.
+- **Anyone at all.** Every posted Root has a 30-minute Dispute window in which it can be
+  voided. Anyone can download the binary and check the arithmetic, which is why it needs no
+  key, no account and no config file.
+- **The spec.** This is the normative implementation of the payout rules
+  ([ADR-0003](docs/adr/0003-normativity-split.md)). The private indexer must produce
+  byte-identical Roots to it, and any rule change lands here first.
+
+Hence the care over reproducible builds: the tool is worth exactly as much as a stranger's
+ability to confirm that the binary gating the signature is the code they can read.
+
+## Running it
+
 ```
 nutz-verify epoch <id> --rpc https://rpc.mainnet.chain.robinhood.com
 nutz-verify latest     --rpc https://rpc.mainnet.chain.robinhood.com
