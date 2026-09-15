@@ -273,7 +273,8 @@ say "The nightly live tier compares the public endpoint against this one byte fo
 say "It is the only test ADR-0002's cross-check has that is not one node compared with itself."
 RPC_4663=""
 if [[ -f "$CONTRACTS_DIR/.env" ]] && sibling=$(grep -E '^RPC_4663=' "$CONTRACTS_DIR/.env" | tail -n1); then
-  sibling=${sibling#*=}
+  # mise reads that file as dotenv: an inline comment, quotes and a CR are not part of the value.
+  sibling=$(printf '%s' "${sibling#*=}" | sed -E 's/[[:space:]]+#.*$//; s/\r$//; s/^["'"'"']//; s/["'"'"']$//; s/[[:space:]]+$//')
   host=$(printf '%s' "$sibling" | sed -E 's#^https?://([^/]+).*#\1#')
   note "nutz-contracts' CI already uses one, and its checkout has it: host $host"
   if confirm "Use that same endpoint here?"; then RPC_4663=$sibling; fi
