@@ -58,16 +58,16 @@ it.
 
 ## Comments
 
-2026-09-15 (agent): handed off. The test above is filed as
+**2026-09-15 — handed off.** The test above is filed as
 `nutz-contracts/.scratch/distributor/issues/11-committed-config-deploys.md` (their `.scratch` is
 gitignored, so the file on disk is the tracker entry; nothing to commit there). Before filing, the
 test was run once as a throwaway probe against nutz-contracts `86e281c`: `[FAIL: ZeroAddress()]`,
 as this ticket predicted. The issue is `needs-triage` rather than `ready-for-agent` because their
 `ci.yml` runs the whole unit suite, so the test is red in CI from the day it lands until the
-signers and keeper are filled in; the maintainer picks between landing it red as the launch gate
+Signers and Keeper are filled in; the maintainer picks between landing it red as the launch gate
 (recommended) and landing it together with the addresses.
 
-One claim above is loose: `test_load_readsTheRobinhoodConfig` asserts a sample of fields (four of
-five tokens, the Pons and Uniswap addresses, one gas and one price bound), not "every field except
-`signers` and `keeper`". The point stands, since it asserts neither of those two, and the filed
-issue says it precisely. Nothing else in this repo changes; the status stays wontfix.
+One claim above is loose: `test_load_readsTheRobinhoodConfig` skips more than `signers` and
+`keeper`, so "every field except" overstates it. The point stands, since it asserts neither of
+those two; the filed issue lists exactly what it skips. Nothing else in this repo changes; the
+status stays wontfix.
