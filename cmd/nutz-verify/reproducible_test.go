@@ -96,7 +96,7 @@ func copyModule(t *testing.T, root, dir string) {
 		}
 	}
 
-	for _, sub := range []string{"cmd", "internal", "scripts"} {
+	for _, sub := range []string{"cmd", "internal", "chain", "cache", "epoch", "merkle", "scripts"} {
 		if err := os.CopyFS(filepath.Join(dir, sub), os.DirFS(filepath.Join(root, sub))); err != nil {
 			t.Fatalf("copying %s: %v", sub, err)
 		}

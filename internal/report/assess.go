@@ -16,7 +16,7 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/nutzwtf/nutz-verify/internal/chain"
+	"github.com/nutzwtf/nutz-verify/chain"
 )
 
 // Verdict is the outcome of a Recompute (CONTEXT.md). Exactly three, and the third is

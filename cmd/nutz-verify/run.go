@@ -9,7 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/nutzwtf/nutz-verify/internal/chain"
+	"github.com/nutzwtf/nutz-verify/cache"
+	"github.com/nutzwtf/nutz-verify/chain"
+	"github.com/nutzwtf/nutz-verify/epoch"
 	"github.com/nutzwtf/nutz-verify/internal/report"
 )
 
@@ -50,7 +52,7 @@ type command struct {
 
 // run is the binary: parse, execute, render, and map the Verdict to an exit status. It is
 // the whole program minus os.Args and os.Exit, so tests drive it directly.
-func run(ctx context.Context, args []string, stdout, stderr io.Writer, dep Deployment) int {
+func run(ctx context.Context, args []string, stdout, stderr io.Writer, dep epoch.Deployment) int {
 	cmd, err := parse(args)
 	if err != nil {
 		fmt.Fprintf(stderr, "nutz-verify: %v\n\n%s", err, usage)
@@ -177,19 +179,18 @@ func parse(args []string) (command, error) {
 }
 
 // verifier is one run's state: the pinned Deployment, the flags, and — once the endpoints
-// have been reconciled — the Reader and the Distributor's book pinned to that tip.
+// have been reconciled — the Engine bound to that tip.
 type verifier struct {
-	dep    Deployment
+	dep    epoch.Deployment
 	opts   options
 	stderr io.Writer
-	reader *chain.Reader
-	book   *book
+	engine *epoch.Engine
 }
 
 // execute runs the command, filling rep as it goes so that a run which fails partway
 // still reports everything it established before the failure.
 func (v *verifier) execute(ctx context.Context, cmd command, rep *report.Report) error {
-	if err := v.dep.check(); err != nil {
+	if err := v.dep.Check(); err != nil {
 		return err
 	}
 
@@ -202,7 +203,6 @@ func (v *verifier) execute(ctx context.Context, cmd command, rep *report.Report)
 	if err != nil {
 		return err
 	}
-	v.reader = reader
 	rep.Run.Endpoints = reader.Endpoints()
 
 	// A stale URL pointing at another chain answers every other question plausibly, and
@@ -220,20 +220,32 @@ func (v *verifier) execute(ctx context.Context, cmd command, rep *report.Report)
 		return err
 	}
 	rep.Run.Tip = &report.Tip{Number: tip.Block.Number, Hash: tip.Block.Hash.String(), Lag: tip.Lag}
-	v.book = newBook(reader, tip.Block.Number)
+
+	dir, err := cache.Dir(v.dep.ChainID, v.dep.Token)
+	if err != nil {
+		return err
+	}
+
+	v.engine, err = epoch.New(reader, tip, dir, v.dep, epoch.Options{
+		Fresh:    v.opts.fresh,
+		Progress: v.progress,
+	})
+	if err != nil {
+		return err
+	}
 
 	switch cmd.name {
 	case "sync":
-		return v.sync(ctx, tip, rep)
+		return v.sync(ctx, rep)
 	case "latest":
-		latest, err := v.latestEpoch(ctx, tip)
+		latest, err := v.engine.Latest(ctx)
 		if err != nil {
 			return err
 		}
 
-		return v.epoch(ctx, latest, tip, rep)
+		return v.epoch(ctx, latest, rep)
 	default:
-		return v.epoch(ctx, cmd.epochID, tip, rep)
+		return v.epoch(ctx, cmd.epochID, rep)
 	}
 }
 

@@ -21,5 +21,32 @@
       "proof": [],
       "leaf": "0xbf8516045da297dafcd752f35d4840ea2a69b8b31329bd2cda547e9466b021d3"
     }
-  ]
+  ],
+  "dump": {
+    "format": "standard-v1",
+    "leafEncoding": [
+      "uint256",
+      "address",
+      "uint256[5]"
+    ],
+    "tree": [
+      "0xbf8516045da297dafcd752f35d4840ea2a69b8b31329bd2cda547e9466b021d3"
+    ],
+    "values": [
+      {
+        "value": [
+          "1",
+          "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          [
+            "1000000000000000000",
+            "0",
+            "0",
+            "0",
+            "0"
+          ]
+        ],
+        "treeIndex": 0
+      }
+    ]
+  }
 }

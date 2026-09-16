@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nutzwtf/nutz-verify/internal/chain"
+	"github.com/nutzwtf/nutz-verify/chain"
 	"github.com/nutzwtf/nutz-verify/internal/report"
 )
 

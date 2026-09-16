@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nutzwtf/nutz-verify/internal/cache"
+	"github.com/nutzwtf/nutz-verify/cache"
 )
 
 // fill writes n records at blocks start, start+1, ... and closes the cache, returning what

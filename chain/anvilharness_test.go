@@ -24,7 +24,7 @@ import (
 //
 // Nothing here validates the Verifier against itself. The chain is driven entirely through
 // `cast` — which builds the calldata, the EIP-712 signatures and the events with an encoder
-// that shares no code with internal/chain — and the Go side only reads. An encoding mistake
+// that shares no code with chain — and the Go side only reads. An encoding mistake
 // we made twice in the same direction would cancel out in a round trip; it cannot cancel out
 // against foundry.
 //

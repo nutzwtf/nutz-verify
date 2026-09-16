@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/nutzwtf/nutz-verify/internal/chain"
+	"github.com/nutzwtf/nutz-verify/chain"
 )
 
 // defaultChunk is how many blocks one Sync read covers. At USDG's density on chain 4663

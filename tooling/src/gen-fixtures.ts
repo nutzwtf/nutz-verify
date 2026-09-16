@@ -95,6 +95,16 @@ for (const fixture of FIXTURES) {
 
   const tree = StandardMerkleTree.of(claims.map(row), ENCODING);
 
+  // The dump the Go port must reproduce (merkle.Tree.Dump). Built from string inputs,
+  // which is how a Bundle's tree.json is written and the only form JSON.stringify can
+  // carry — a BigInt has no JSON form. Same leaves, so the same root, asserted.
+  const stringRow = (c: Claim) =>
+    [fixture.id.toString(), c.account, c.amounts.map((a) => a.toString())] as const;
+  const dumped = StandardMerkleTree.of(claims.map(stringRow), ENCODING);
+  if (dumped.root !== tree.root) {
+    throw new Error(`${fixture.name}: string-valued tree has root ${dumped.root}, bigint-valued ${tree.root}`);
+  }
+
   const out = {
     name: fixture.name,
     note: fixture.note,
@@ -107,6 +117,7 @@ for (const fixture of FIXTURES) {
       proof: tree.getProof(i),
       leaf: tree.leafHash(row(c)),
     })),
+    dump: dumped.dump(),
   };
 
   const target = join(outDir, `${fixture.name}.json`);

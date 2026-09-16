@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nutzwtf/nutz-verify/internal/cache"
-	"github.com/nutzwtf/nutz-verify/internal/chain"
+	"github.com/nutzwtf/nutz-verify/cache"
+	"github.com/nutzwtf/nutz-verify/chain"
 )
 
 var (

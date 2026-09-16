@@ -2,13 +2,15 @@ package merkle_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"math/big"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"testing"
 
-	"github.com/nutzwtf/nutz-verify/internal/merkle"
+	"github.com/nutzwtf/nutz-verify/merkle"
 )
 
 // Pinned by value, not read from claims.json: a swapped fixture must fail, not redefine.
@@ -207,4 +209,58 @@ func TestVerify_RejectsForgedProofs(t *testing.T) {
 			t.Error("a truncated proof verified")
 		}
 	})
+}
+
+// Dump must be what OpenZeppelin's own dump() wrote for the same claims, compared as
+// parsed JSON: load() is the contract, not JSON.stringify's layout. claims.json comes from
+// nutz-contracts without a dump and is skipped.
+func TestDump_MatchesOpenZeppelinDump(t *testing.T) {
+	t.Parallel()
+
+	paths, err := filepath.Glob(fixturePath("*.json"))
+	if err != nil {
+		t.Fatalf("globbing fixtures: %v", err)
+	}
+
+	dumped := 0
+	for _, path := range paths {
+		f, tree := loadTree(t, path)
+		if len(f.Dump) == 0 {
+			continue
+		}
+		dumped++
+
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			t.Parallel()
+
+			var expected any
+			if err := json.Unmarshal(f.Dump, &expected); err != nil {
+				t.Fatalf("parsing the fixture's dump: %v", err)
+			}
+
+			raw, err := json.Marshal(tree.Dump())
+			if err != nil {
+				t.Fatalf("marshalling Dump(): %v", err)
+			}
+			var got any
+			if err := json.Unmarshal(raw, &got); err != nil {
+				t.Fatalf("re-parsing Dump(): %v", err)
+			}
+
+			if !reflect.DeepEqual(got, expected) {
+				t.Errorf("Dump() differs from OpenZeppelin's:\n got %s\nwant %s", raw, f.Dump)
+			}
+
+			d := tree.Dump()
+			for i := range f.Claims {
+				if d.Values[i].TreeIndex != tree.TreeIndex(i) {
+					t.Errorf("claim %d: Dump treeIndex %d, TreeIndex() %d", i, d.Values[i].TreeIndex, tree.TreeIndex(i))
+				}
+			}
+		})
+	}
+
+	if dumped == 0 {
+		t.Fatal("no fixture carries a dump; regenerate with tooling/ (pnpm gen:fixtures)")
+	}
 }

@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/nutzwtf/nutz-verify/internal/chain"
+	"github.com/nutzwtf/nutz-verify/chain"
 )
 
 // SchemaVersion names the shape of the --json document. It is the Signer's interface:

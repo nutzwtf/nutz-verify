@@ -33,7 +33,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/nutzwtf/nutz-verify/internal/chain"
+	"github.com/nutzwtf/nutz-verify/chain"
 )
 
 // FileName is the log inside the Cache directory. One file, because the Cache holds one

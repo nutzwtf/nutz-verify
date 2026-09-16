@@ -1,4 +1,11 @@
-package main
+// Package fakenode is a JSON-RPC server with a chain of blocks, the token's and the
+// Distributor's logs, and the Distributor's ledger() book — enough to drive the Engine and
+// the whole binary without a node. It is the system boundary the tests mock; nothing
+// inside the module is.
+//
+// It speaks the wire format directly rather than borrowing chain's encoders, so a decoding
+// bug there cannot be matched by an identical encoding bug here.
+package fakenode
 
 import (
 	"bytes"
@@ -15,37 +22,33 @@ import (
 
 	"golang.org/x/crypto/sha3"
 
-	"github.com/nutzwtf/nutz-verify/internal/chain"
+	"github.com/nutzwtf/nutz-verify/chain"
 )
 
-// fakeNode is a JSON-RPC server with a chain of blocks, the token's and the Distributor's
-// logs, and the Distributor's ledger() book — enough to drive the whole binary without a
-// node. It is the system boundary the CLI tests mock; nothing inside the binary is.
-//
-// It speaks the wire format directly rather than borrowing internal/chain's encoders, so a
-// decoding bug there cannot be matched by an identical encoding bug here.
-type fakeNode struct {
-	chainID    uint64
-	timestamps []int64 // index is the block number
-	tips       map[string]uint64
-	hashSalt   byte // lets a second node disagree about a block hash
+// Node is one fake endpoint. Fields are set before Serve; the server does not lock them.
+type Node struct {
+	ChainID    uint64
+	Timestamps []int64 // index is the block number
+	Tips       map[string]uint64
+	HashSalt   byte // lets a second node disagree about a block hash
 
 	logs    []wireLog
-	ledgers map[uint64]fakeLedger // by Epoch id
+	Ledgers map[uint64]Ledger // by Epoch id
 
-	// httpStatus, when non-zero, is answered to every request instead of a reply.
-	httpStatus int
+	// HTTPStatus, when non-zero, is answered to every request instead of a reply.
+	HTTPStatus int
 
 	mu       sync.Mutex
 	requests int
 }
 
-type fakeLedger struct {
-	root         chain.Hash
-	rootPostedAt int64
-	skipped      bool
-	funded       chain.Amounts
-	totals       chain.Amounts
+// Ledger is what ledger(kind, id) answers for one Epoch.
+type Ledger struct {
+	Root         chain.Hash
+	RootPostedAt int64
+	Skipped      bool
+	Funded       chain.Amounts
+	Totals       chain.Amounts
 }
 
 type wireLog struct {
@@ -60,18 +63,20 @@ type wireLog struct {
 	Removed     bool     `json:"removed"`
 }
 
-func newFakeNode(timestamps []int64) *fakeNode {
+// New is a chain 4663 node whose block i has timestamps[i], with every tip at the last block.
+func New(timestamps []int64) *Node {
 	last := uint64(len(timestamps) - 1)
 
-	return &fakeNode{
-		chainID:    4663,
-		timestamps: timestamps,
-		tips:       map[string]uint64{"latest": last, "safe": last, "finalized": last},
-		ledgers:    map[uint64]fakeLedger{},
+	return &Node{
+		ChainID:    4663,
+		Timestamps: timestamps,
+		Tips:       map[string]uint64{"latest": last, "safe": last, "finalized": last},
+		Ledgers:    map[uint64]Ledger{},
 	}
 }
 
-func (n *fakeNode) serve(t *testing.T) string {
+// Serve starts the node for the test's lifetime and returns its URL.
+func (n *Node) Serve(t *testing.T) string {
 	t.Helper()
 
 	server := httptest.NewServer(http.HandlerFunc(n.handle))
@@ -80,8 +85,9 @@ func (n *fakeNode) serve(t *testing.T) string {
 	return server.URL
 }
 
-func (n *fakeNode) hashOf(block uint64) chain.Hash {
-	return keccak(append(big.NewInt(int64(block)).Bytes(), n.hashSalt))
+// HashOf is the node's hash for a block.
+func (n *Node) HashOf(block uint64) chain.Hash {
+	return keccak(append(big.NewInt(int64(block)).Bytes(), n.HashSalt))
 }
 
 type rpcRequest struct {
@@ -102,7 +108,7 @@ type rpcError struct {
 	Message string `json:"message"`
 }
 
-func (n *fakeNode) handle(w http.ResponseWriter, r *http.Request) {
+func (n *Node) handle(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -114,8 +120,8 @@ func (n *fakeNode) handle(w http.ResponseWriter, r *http.Request) {
 	n.requests++
 	n.mu.Unlock()
 
-	if n.httpStatus != 0 {
-		http.Error(w, "upstream is having a moment", n.httpStatus)
+	if n.HTTPStatus != 0 {
+		http.Error(w, "upstream is having a moment", n.HTTPStatus)
 
 		return
 	}
@@ -149,7 +155,7 @@ func (n *fakeNode) handle(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(n.answer(req))
 }
 
-func (n *fakeNode) answer(req rpcRequest) rpcReply {
+func (n *Node) answer(req rpcRequest) rpcReply {
 	result, err := n.dispatch(req)
 	if err != nil {
 		return rpcReply{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: -32000, Message: err.Error()}}
@@ -158,10 +164,10 @@ func (n *fakeNode) answer(req rpcRequest) rpcReply {
 	return rpcReply{JSONRPC: "2.0", ID: req.ID, Result: result}
 }
 
-func (n *fakeNode) dispatch(req rpcRequest) (any, error) {
+func (n *Node) dispatch(req rpcRequest) (any, error) {
 	switch req.Method {
 	case "eth_chainId":
-		return quantity(n.chainID), nil
+		return quantity(n.ChainID), nil
 	case "eth_getBlockByNumber":
 		var tag string
 		if err := json.Unmarshal(req.Params[0], &tag); err != nil {
@@ -195,11 +201,11 @@ func (n *fakeNode) dispatch(req rpcRequest) (any, error) {
 	}
 }
 
-func (n *fakeNode) block(tag string) any {
-	number, ok := n.tips[tag]
+func (n *Node) block(tag string) any {
+	number, ok := n.Tips[tag]
 	if !ok {
 		parsed, err := parseQuantity(tag)
-		if err != nil || parsed >= uint64(len(n.timestamps)) {
+		if err != nil || parsed >= uint64(len(n.Timestamps)) {
 			return nil
 		}
 
@@ -208,18 +214,18 @@ func (n *fakeNode) block(tag string) any {
 
 	parent := chain.Hash{}
 	if number > 0 {
-		parent = n.hashOf(number - 1)
+		parent = n.HashOf(number - 1)
 	}
 
 	return map[string]any{
 		"number":     quantity(number),
-		"hash":       n.hashOf(number).String(),
+		"hash":       n.HashOf(number).String(),
 		"parentHash": parent.String(),
-		"timestamp":  quantity(uint64(n.timestamps[number])),
+		"timestamp":  quantity(uint64(n.Timestamps[number])),
 	}
 }
 
-func (n *fakeNode) getLogs(fromHex, toHex, address, topic0 string) (any, error) {
+func (n *Node) getLogs(fromHex, toHex, address, topic0 string) (any, error) {
 	from, err := parseQuantity(fromHex)
 	if err != nil {
 		return nil, err
@@ -239,7 +245,7 @@ func (n *fakeNode) getLogs(fromHex, toHex, address, topic0 string) (any, error) 
 			continue
 		}
 
-		l.BlockHash = n.hashOf(block).String()
+		l.BlockHash = n.HashOf(block).String()
 		out = append(out, l)
 	}
 
@@ -248,7 +254,7 @@ func (n *fakeNode) getLogs(fromHex, toHex, address, topic0 string) (any, error) 
 
 // call answers ledger(kind, id): the selector, a kind word and an id word in, eighteen
 // static words out. Anything else is an address with no code, which returns nothing.
-func (n *fakeNode) call(data string) (any, error) {
+func (n *Node) call(data string) (any, error) {
 	raw, err := hex.DecodeString(strings.TrimPrefix(data, "0x"))
 	if err != nil {
 		return nil, err
@@ -259,17 +265,17 @@ func (n *fakeNode) call(data string) (any, error) {
 	}
 
 	id := new(big.Int).SetBytes(raw[4+32:]).Uint64()
-	l := n.ledgers[id]
+	l := n.Ledgers[id]
 
 	var out []byte
-	out = append(out, l.root[:]...)
-	out = append(out, word(big.NewInt(l.rootPostedAt))...)
+	out = append(out, l.Root[:]...)
+	out = append(out, word(big.NewInt(l.RootPostedAt))...)
 	skipped := big.NewInt(0)
-	if l.skipped {
+	if l.Skipped {
 		skipped = big.NewInt(1)
 	}
 	out = append(out, word(skipped)...)
-	for _, group := range []chain.Amounts{l.funded, l.totals, zeroAmounts()} {
+	for _, group := range []chain.Amounts{l.Funded, l.Totals, chain.Amounts{}} {
 		for _, a := range group {
 			if a == nil {
 				a = new(big.Int) // an Epoch the book never touched
@@ -281,9 +287,23 @@ func (n *fakeNode) call(data string) (any, error) {
 	return "0x" + hex.EncodeToString(out), nil
 }
 
+// DropLastLog forgets the most recently appended log, so a test can re-post a Root.
+func (n *Node) DropLastLog() {
+	n.logs = n.logs[:len(n.logs)-1]
+}
+
+// Requests is how many HTTP requests the node has answered.
+func (n *Node) Requests() int {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	return n.requests
+}
+
 // ----------------------------------------------------------------- log builders
 
-func (n *fakeNode) transfer(block uint64, token, from, to chain.Address, value int64) {
+// Transfer appends a NUTZ Transfer log at block.
+func (n *Node) Transfer(block uint64, token, from, to chain.Address, value int64) {
 	n.logs = append(n.logs, wireLog{
 		Address:     token.String(),
 		Topics:      []string{topic("Transfer(address,address,uint256)"), addressTopic(from), addressTopic(to)},
@@ -293,7 +313,8 @@ func (n *fakeNode) transfer(block uint64, token, from, to chain.Address, value i
 	})
 }
 
-func (n *fakeNode) exclusion(block uint64, distributor, account chain.Address) {
+// Exclusion appends an ExcludedAppended log at block.
+func (n *Node) Exclusion(block uint64, distributor, account chain.Address) {
 	n.logs = append(n.logs, wireLog{
 		Address:     distributor.String(),
 		Topics:      []string{topic("ExcludedAppended(address)"), addressTopic(account)},
@@ -303,7 +324,8 @@ func (n *fakeNode) exclusion(block uint64, distributor, account chain.Address) {
 	})
 }
 
-func (n *fakeNode) rootPosted(block uint64, distributor chain.Address, id uint64, root chain.Hash, totals, carryIn chain.Amounts) {
+// RootPosted appends an Epoch RootPosted log at block.
+func (n *Node) RootPosted(block uint64, distributor chain.Address, id uint64, root chain.Hash, totals, carryIn chain.Amounts) {
 	data := append([]byte{}, root[:]...)
 	for _, group := range []chain.Amounts{totals, carryIn} {
 		for _, a := range group {
@@ -373,8 +395,12 @@ func parseQuantity(s string) (uint64, error) {
 	return n, nil
 }
 
-func amounts(vs ...int64) chain.Amounts {
+// Amounts is a five-token vector from up to five small values; the rest are zero.
+func Amounts(vs ...int64) chain.Amounts {
 	var out chain.Amounts
+	for i := range out {
+		out[i] = new(big.Int)
+	}
 	for i, v := range vs {
 		out[i] = big.NewInt(v)
 	}

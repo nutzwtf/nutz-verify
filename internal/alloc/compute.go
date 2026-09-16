@@ -4,7 +4,7 @@
 // Like internal/twab it is a pure function over an in-memory transfer list. ADR-0003 makes
 // the rules here normative — if the private indexer disagrees, the indexer is the bug —
 // while the tree shape belongs to the Distributor and OpenZeppelin StandardMerkleTree, so
-// the leaf hashing is delegated to internal/merkle rather than restated.
+// the leaf hashing is delegated to merkle rather than restated.
 package alloc
 
 import (
@@ -12,8 +12,8 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/nutzwtf/nutz-verify/internal/merkle"
 	"github.com/nutzwtf/nutz-verify/internal/twab"
+	"github.com/nutzwtf/nutz-verify/merkle"
 )
 
 // TokenCount is the number of reward tokens an Epoch funds: SPY, NVDA, MU, SPCX, USDG.

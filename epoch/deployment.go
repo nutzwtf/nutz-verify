@@ -1,12 +1,12 @@
-package main
+package epoch
 
 import (
 	"errors"
 
-	"github.com/nutzwtf/nutz-verify/internal/chain"
+	"github.com/nutzwtf/nutz-verify/chain"
 )
 
-// Deployment is every input a Recompute has that is not on the chain, pinned in the binary
+// Deployment is every input a Recompute has that is not on the chain, pinned in the code
 // rather than taken as a flag.
 //
 // ADR-0002 wants the unverifiable inputs shown rather than buried, and every run's header
@@ -34,25 +34,29 @@ type Deployment struct {
 	DistributorBlock uint64
 }
 
-// pinned is chain 4663's deployment.
+// Pinned is chain 4663's deployment: what the binary the Signer runs and the indexer that
+// links this module both verify against. A function and not a variable for the reason
+// above — a value an importer could assign is a flag by another name.
 //
 // NUTZ has not launched (spec §4, §9: "NUTZ does not exist yet"), so there is nothing to
-// pin yet. Every field a Recompute needs is left empty and check refuses to run, with exit
+// pin yet. Every field a Recompute needs is left empty and Check refuses to run, with exit
 // 2, until the launch runbook fills them in — a binary that ran against a zero address
 // would report an Epoch with no transfers and no Root, confidently.
-var pinned = Deployment{
-	ChainID: 4663,
+func Pinned() Deployment {
+	return Deployment{
+		ChainID: 4663,
+	}
 }
 
-// errNotPinned is why an unpinned build cannot run. It is INDETERMINATE: no check happened.
-var errNotPinned = errors.New("this build is not pinned to a deployment: NUTZ has not launched, " +
-	"and cmd/nutz-verify/deployment.go has no Token, Distributor and DEV_WALLET to verify against")
+// ErrNotPinned is why an unpinned build cannot run. It is INDETERMINATE: no check happened.
+var ErrNotPinned = errors.New("this build is not pinned to a deployment: NUTZ has not launched, " +
+	"and epoch/deployment.go has no Token, Distributor and DEV_WALLET to verify against")
 
-// check refuses a Deployment that could not name a Distributor and token to read.
-func (d Deployment) check() error {
+// Check refuses a Deployment that could not name a Distributor and token to read.
+func (d Deployment) Check() error {
 	if d.ChainID == 0 || d.Token == (chain.Address{}) || d.Distributor == (chain.Address{}) ||
 		d.DevWallet == (chain.Address{}) {
-		return errNotPinned
+		return ErrNotPinned
 	}
 
 	return nil

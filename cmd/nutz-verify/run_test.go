@@ -11,7 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nutzwtf/nutz-verify/internal/chain"
+	"github.com/nutzwtf/nutz-verify/chain"
+	"github.com/nutzwtf/nutz-verify/epoch"
+	"github.com/nutzwtf/nutz-verify/internal/fakenode"
 )
 
 func repeatAddr(b byte) chain.Address {
@@ -54,7 +56,7 @@ func mustHash(s string) chain.Hash {
 
 // testDeployment is the Deployment the fake chain is pinned to: the token created at block
 // 1, the Distributor deployed at block 5990, in Epoch 998.
-var testDeployment = Deployment{
+var testDeployment = epoch.Deployment{
 	ChainID:          4663,
 	Token:            token,
 	Distributor:      distributor,
@@ -72,29 +74,29 @@ var testDeployment = Deployment{
 //
 // Tips: latest has Epoch 1001 closed, safe has the Root's block, finalized has not
 // reached the end of Epoch 1000.
-func scenario() *fakeNode {
+func scenario() *fakenode.Node {
 	timestamps := make([]int64, 6020)
 	for i := range timestamps {
 		timestamps[i] = int64(i) * 600
 	}
 	timestamps[5999] = 3599999
 
-	n := newFakeNode(timestamps)
-	n.tips["safe"] = 6012
-	n.tips["finalized"] = 6004
+	n := fakenode.New(timestamps)
+	n.Tips["safe"] = 6012
+	n.Tips["finalized"] = 6004
 
-	n.exclusion(5990, distributor, treasury)
-	n.transfer(1, token, chain.Address{}, treasury, 1000000)
-	n.transfer(5999, token, treasury, alice, 3)
-	n.transfer(5999, token, treasury, bob, 1)
-	n.rootPosted(6008, distributor, 1000, caseRoot, amounts(1500, 0, 500, 0, 6), amounts(500, 0, 0, 0, 7))
+	n.Exclusion(5990, distributor, treasury)
+	n.Transfer(1, token, chain.Address{}, treasury, 1000000)
+	n.Transfer(5999, token, treasury, alice, 3)
+	n.Transfer(5999, token, treasury, bob, 1)
+	n.RootPosted(6008, distributor, 1000, caseRoot, fakenode.Amounts(1500, 0, 500, 0, 6), fakenode.Amounts(500, 0, 0, 0, 7))
 
-	n.ledgers[999] = fakeLedger{skipped: true, funded: amounts(500, 0, 0, 0, 7), totals: zeroAmounts()}
-	n.ledgers[1000] = fakeLedger{
-		root:         caseRoot,
-		rootPostedAt: timestamps[6008],
-		funded:       amounts(1000, 0, 500, 1, 0),
-		totals:       amounts(1500, 0, 500, 0, 6),
+	n.Ledgers[999] = fakenode.Ledger{Skipped: true, Funded: fakenode.Amounts(500, 0, 0, 0, 7), Totals: fakenode.Amounts()}
+	n.Ledgers[1000] = fakenode.Ledger{
+		Root:         caseRoot,
+		RootPostedAt: timestamps[6008],
+		Funded:       fakenode.Amounts(1000, 0, 500, 1, 0),
+		Totals:       fakenode.Amounts(1500, 0, 500, 0, 6),
 	}
 
 	return n
@@ -102,13 +104,13 @@ func scenario() *fakeNode {
 
 // cli runs the binary's entry point against the given nodes with a throwaway Cache, and
 // returns the exit code and both streams.
-func cli(t *testing.T, dep Deployment, nodes []*fakeNode, args ...string) (int, string, string) {
+func cli(t *testing.T, dep epoch.Deployment, nodes []*fakenode.Node, args ...string) (int, string, string) {
 	t.Helper()
 
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
 	for _, n := range nodes {
-		args = append(args, "--rpc", n.serve(t))
+		args = append(args, "--rpc", n.Serve(t))
 	}
 	args = append(args, "--rate", "1000000") // a fake node has no budget to respect
 
@@ -121,7 +123,7 @@ func cli(t *testing.T, dep Deployment, nodes []*fakeNode, args ...string) (int, 
 }
 
 func TestEpoch_MatchExitsZeroOnFourLines(t *testing.T) {
-	code, stdout, _ := cli(t, testDeployment, []*fakeNode{scenario()}, "epoch", "1000")
+	code, stdout, _ := cli(t, testDeployment, []*fakenode.Node{scenario()}, "epoch", "1000")
 
 	if code != 0 {
 		t.Fatalf("exit %d, want 0", code)
@@ -145,13 +147,13 @@ func TestEpoch_MismatchNamesTheBrokenLine(t *testing.T) {
 	// cap and carryIn hold, and the output says so line by line.
 	node := scenario()
 	wrong := chain.Hash{0xbb}
-	node.logs = node.logs[:len(node.logs)-1]
-	node.rootPosted(6008, distributor, 1000, wrong, amounts(1500, 0, 500, 0, 7), amounts(500, 0, 0, 0, 7))
-	l := node.ledgers[1000]
-	l.root, l.totals = wrong, amounts(1500, 0, 500, 0, 7)
-	node.ledgers[1000] = l
+	node.DropLastLog()
+	node.RootPosted(6008, distributor, 1000, wrong, fakenode.Amounts(1500, 0, 500, 0, 7), fakenode.Amounts(500, 0, 0, 0, 7))
+	l := node.Ledgers[1000]
+	l.Root, l.Totals = wrong, fakenode.Amounts(1500, 0, 500, 0, 7)
+	node.Ledgers[1000] = l
 
-	code, stdout, _ := cli(t, testDeployment, []*fakeNode{node}, "epoch", "1000")
+	code, stdout, _ := cli(t, testDeployment, []*fakenode.Node{node}, "epoch", "1000")
 
 	if code != 1 {
 		t.Fatalf("exit %d, want 1", code)
@@ -172,7 +174,7 @@ func TestEpoch_MismatchNamesTheBrokenLine(t *testing.T) {
 func TestEpoch_BelowTheRequestedFinalityIsIndeterminate(t *testing.T) {
 	// The finalized head is block 6004, inside Epoch 1000. Nothing was checked, so exit 2,
 	// and the reason names the finality level so the reader knows what to lower.
-	code, stdout, _ := cli(t, testDeployment, []*fakeNode{scenario()}, "epoch", "1000", "--finality", "finalized")
+	code, stdout, _ := cli(t, testDeployment, []*fakenode.Node{scenario()}, "epoch", "1000", "--finality", "finalized")
 
 	if code != 2 {
 		t.Fatalf("exit %d, want 2", code)
@@ -186,9 +188,9 @@ func TestEpoch_EndpointsDisagreeingIsIndeterminate(t *testing.T) {
 	// Two endpoints serving the same history with different block hashes. Neither is
 	// preferred; the run stops with exit 2 and says which two disagree.
 	other := scenario()
-	other.hashSalt = 1
+	other.HashSalt = 1
 
-	code, stdout, _ := cli(t, testDeployment, []*fakeNode{scenario(), other}, "epoch", "1000")
+	code, stdout, _ := cli(t, testDeployment, []*fakenode.Node{scenario(), other}, "epoch", "1000")
 
 	if code != 2 {
 		t.Fatalf("exit %d, want 2", code)
@@ -200,7 +202,7 @@ func TestEpoch_EndpointsDisagreeingIsIndeterminate(t *testing.T) {
 
 func TestEpoch_EndpointsAgreeingCrossCheck(t *testing.T) {
 	// The same scenario from two endpoints that agree is a MATCH, and the header names both.
-	code, stdout, _ := cli(t, testDeployment, []*fakeNode{scenario(), scenario()}, "epoch", "1000")
+	code, stdout, _ := cli(t, testDeployment, []*fakenode.Node{scenario(), scenario()}, "epoch", "1000")
 
 	if code != 0 {
 		t.Fatalf("exit %d, want 0", code)
@@ -213,9 +215,9 @@ func TestEpoch_EndpointsAgreeingCrossCheck(t *testing.T) {
 func TestEpoch_AFundedEpochWithNoRootExitsZero(t *testing.T) {
 	// Epoch 999 is funded and has no eligible Holder — Alice and Bob bought at its last
 	// second — so no Root is right, whether the Distributor has already skipped it or not.
-	code, stdout, _ := cli(t, testDeployment, []*fakeNode{scenario()}, "epoch", "999")
+	code, stdout, _ := cli(t, testDeployment, []*fakenode.Node{scenario()}, "epoch", "999")
 	if code != 0 {
-		t.Fatalf("skipped: exit %d, want 0\n%s", code, stdout)
+		t.Fatalf("Skipped: exit %d, want 0\n%s", code, stdout)
 	}
 	if !strings.Contains(stdout, "posted       no Root: skipped by a later Root") {
 		t.Errorf("stdout = %q", stdout)
@@ -223,12 +225,12 @@ func TestEpoch_AFundedEpochWithNoRootExitsZero(t *testing.T) {
 
 	// Before the Root for 1000 was posted, 999 was simply funded and unrooted.
 	node := scenario()
-	node.tips["safe"] = 6007
-	l := node.ledgers[999]
-	l.skipped = false
-	node.ledgers[999] = l
+	node.Tips["safe"] = 6007
+	l := node.Ledgers[999]
+	l.Skipped = false
+	node.Ledgers[999] = l
 
-	code, stdout, _ = cli(t, testDeployment, []*fakeNode{node}, "epoch", "999")
+	code, stdout, _ = cli(t, testDeployment, []*fakenode.Node{node}, "epoch", "999")
 	if code != 0 {
 		t.Fatalf("pending: exit %d, want 0\n%s", code, stdout)
 	}
@@ -241,10 +243,10 @@ func TestEpoch_NoRootPostedYetIsIndeterminate(t *testing.T) {
 	// Epoch 1000 has closed at safe finality but its Root is not up yet: the Recompute has
 	// a tree and the chain has nothing. Exit 2, and the reason says so.
 	node := scenario()
-	node.tips["safe"] = 6007
-	delete(node.ledgers, 1000)
+	node.Tips["safe"] = 6007
+	delete(node.Ledgers, 1000)
 
-	code, stdout, _ := cli(t, testDeployment, []*fakeNode{node}, "epoch", "1000")
+	code, stdout, _ := cli(t, testDeployment, []*fakenode.Node{node}, "epoch", "1000")
 
 	if code != 2 {
 		t.Fatalf("exit %d, want 2", code)
@@ -255,7 +257,7 @@ func TestEpoch_NoRootPostedYetIsIndeterminate(t *testing.T) {
 }
 
 func TestLatest_ResolvesToTheMostRecentRoot(t *testing.T) {
-	code, stdout, _ := cli(t, testDeployment, []*fakeNode{scenario()}, "latest")
+	code, stdout, _ := cli(t, testDeployment, []*fakenode.Node{scenario()}, "latest")
 
 	if code != 0 {
 		t.Fatalf("exit %d, want 0", code)
@@ -267,9 +269,9 @@ func TestLatest_ResolvesToTheMostRecentRoot(t *testing.T) {
 	// Voided and not re-posted: the ledger holds no Root, so the log alone does not make
 	// Epoch 1000 the latest, and with nothing before it there is no latest at all.
 	node := scenario()
-	delete(node.ledgers, 1000)
+	delete(node.Ledgers, 1000)
 
-	code, stdout, _ = cli(t, testDeployment, []*fakeNode{node}, "latest")
+	code, stdout, _ = cli(t, testDeployment, []*fakenode.Node{node}, "latest")
 	if code != 2 {
 		t.Fatalf("voided: exit %d, want 2", code)
 	}
@@ -279,7 +281,7 @@ func TestLatest_ResolvesToTheMostRecentRoot(t *testing.T) {
 }
 
 func TestSync_AdvancesTheCacheAndReportsIt(t *testing.T) {
-	code, stdout, stderr := cli(t, testDeployment, []*fakeNode{scenario()}, "sync")
+	code, stdout, stderr := cli(t, testDeployment, []*fakenode.Node{scenario()}, "sync")
 
 	if code != 0 {
 		t.Fatalf("exit %d, want 0", code)
@@ -293,7 +295,7 @@ func TestSync_AdvancesTheCacheAndReportsIt(t *testing.T) {
 }
 
 func TestRun_JSONCarriesTheSchemaAndTheVerdict(t *testing.T) {
-	code, stdout, _ := cli(t, testDeployment, []*fakeNode{scenario()}, "epoch", "1000", "--json")
+	code, stdout, _ := cli(t, testDeployment, []*fakenode.Node{scenario()}, "epoch", "1000", "--json")
 
 	if code != 0 {
 		t.Fatalf("exit %d, want 0", code)
@@ -326,9 +328,9 @@ func TestRun_JSONCarriesTheSchemaAndTheVerdict(t *testing.T) {
 
 func TestRun_RPCFailureIsIndeterminate(t *testing.T) {
 	node := scenario()
-	node.httpStatus = 503
+	node.HTTPStatus = 503
 
-	code, stdout, _ := cli(t, testDeployment, []*fakeNode{node}, "epoch", "1000")
+	code, stdout, _ := cli(t, testDeployment, []*fakenode.Node{node}, "epoch", "1000")
 
 	if code != 2 {
 		t.Fatalf("exit %d, want 2", code)
@@ -345,7 +347,7 @@ func TestRun_CacheFromAnotherHistoryNeedsFresh(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", cacheHome)
 
 	node := scenario()
-	url := node.serve(t)
+	url := node.Serve(t)
 	args := []string{"epoch", "1000", "--rpc", url, "--rate", "1000000"}
 
 	var stdout bytes.Buffer
@@ -375,17 +377,17 @@ func TestEpoch_ChainWalksEveryRootFromDeploy(t *testing.T) {
 	// [0 0 0 1 1] over the same Holders. The chain walk asserts 1000 with the deploy-time
 	// Carry and 1001 with 1000's recomputed carryOut, and both sections are reported.
 	node := scenario()
-	node.tips["safe"] = 6019
+	node.Tips["safe"] = 6019
 	root1001 := chain.Hash{0x10, 0x01} // wrong on purpose: this test is about the walk, not the tree
-	node.rootPosted(6014, distributor, 1001, root1001, amounts(4, 0, 0, 0, 0), amounts(0, 0, 0, 1, 1))
-	node.ledgers[1001] = fakeLedger{
-		root:         root1001,
-		rootPostedAt: 6014 * 600,
-		funded:       amounts(4, 0, 0, 0, 0),
-		totals:       amounts(4, 0, 0, 0, 0),
+	node.RootPosted(6014, distributor, 1001, root1001, fakenode.Amounts(4, 0, 0, 0, 0), fakenode.Amounts(0, 0, 0, 1, 1))
+	node.Ledgers[1001] = fakenode.Ledger{
+		Root:         root1001,
+		RootPostedAt: 6014 * 600,
+		Funded:       fakenode.Amounts(4, 0, 0, 0, 0),
+		Totals:       fakenode.Amounts(4, 0, 0, 0, 0),
 	}
 
-	code, stdout, _ := cli(t, testDeployment, []*fakeNode{node}, "epoch", "1001", "--chain")
+	code, stdout, _ := cli(t, testDeployment, []*fakenode.Node{node}, "epoch", "1001", "--chain")
 
 	if code != 1 {
 		t.Fatalf("exit %d, want 1 (the 1001 Root is deliberately wrong)", code)
@@ -411,11 +413,11 @@ func TestEpoch_CarryInFromThePreviousRootsRecompute(t *testing.T) {
 	// Without --chain the walk starts at the previous rooted Epoch, recomputed with its own
 	// posted carryIn, and 1001's carryIn is asserted against that carryOut.
 	node := scenario()
-	node.tips["safe"] = 6019
-	node.rootPosted(6014, distributor, 1001, chain.Hash{1}, amounts(4, 0, 0, 0, 0), amounts(0, 0, 0, 1, 2))
-	node.ledgers[1001] = fakeLedger{root: chain.Hash{1}, rootPostedAt: 6014 * 600, funded: amounts(4, 0, 0, 0, 0), totals: amounts(4, 0, 0, 0, 0)}
+	node.Tips["safe"] = 6019
+	node.RootPosted(6014, distributor, 1001, chain.Hash{1}, fakenode.Amounts(4, 0, 0, 0, 0), fakenode.Amounts(0, 0, 0, 1, 2))
+	node.Ledgers[1001] = fakenode.Ledger{Root: chain.Hash{1}, RootPostedAt: 6014 * 600, Funded: fakenode.Amounts(4, 0, 0, 0, 0), Totals: fakenode.Amounts(4, 0, 0, 0, 0)}
 
-	code, stdout, _ := cli(t, testDeployment, []*fakeNode{node}, "epoch", "1001")
+	code, stdout, _ := cli(t, testDeployment, []*fakenode.Node{node}, "epoch", "1001")
 
 	if code != 1 {
 		t.Fatalf("exit %d, want 1", code)
@@ -452,7 +454,7 @@ const publishedRows = `[
 func TestArtifacts_DiffTheBundleAfterTheVerdict(t *testing.T) {
 	// A faithful bundle, in both row spellings, agrees.
 	dir := writeBundle(t, fmt.Sprintf(publishedRows, "125"), caseRoot.String())
-	code, stdout, _ := cli(t, testDeployment, []*fakeNode{scenario()}, "epoch", "1000", "--artifacts", dir)
+	code, stdout, _ := cli(t, testDeployment, []*fakenode.Node{scenario()}, "epoch", "1000", "--artifacts", dir)
 	if code != 0 {
 		t.Fatalf("faithful: exit %d, want 0\n%s", code, stdout)
 	}
@@ -463,7 +465,7 @@ func TestArtifacts_DiffTheBundleAfterTheVerdict(t *testing.T) {
 	// A corrupted bundle reports the first differing row — and the Verdict is still the
 	// Recompute's own, because the bundle is compared, never consulted.
 	dir = writeBundle(t, fmt.Sprintf(publishedRows, "120"), caseRoot.String())
-	code, stdout, _ = cli(t, testDeployment, []*fakeNode{scenario()}, "epoch", "1000", "--artifacts", dir)
+	code, stdout, _ = cli(t, testDeployment, []*fakenode.Node{scenario()}, "epoch", "1000", "--artifacts", dir)
 	if code != 0 {
 		t.Fatalf("corrupted rows: exit %d, want 0\n%s", code, stdout)
 	}
@@ -476,14 +478,14 @@ func TestArtifacts_DiffTheBundleAfterTheVerdict(t *testing.T) {
 
 	// A wrong root.txt over right rows.
 	dir = writeBundle(t, fmt.Sprintf(publishedRows, "125"), chain.Hash{0xff}.String())
-	_, stdout, _ = cli(t, testDeployment, []*fakeNode{scenario()}, "epoch", "1000", "--artifacts", dir)
+	_, stdout, _ = cli(t, testDeployment, []*fakenode.Node{scenario()}, "epoch", "1000", "--artifacts", dir)
 	if !strings.Contains(stdout, "DIFFERS: root.txt is "+chain.Hash{0xff}.String()+", recomputed "+caseRoot.String()) {
 		t.Errorf("stdout = %q", stdout)
 	}
 
 	// A bundle that cannot be read is said so, and the Verdict is untouched: an unreadable
 	// bundle must not turn a MATCH — or a MISMATCH — into an exit 2.
-	code, stdout, _ = cli(t, testDeployment, []*fakeNode{scenario()}, "epoch", "1000", "--artifacts", filepath.Join(dir, "missing"))
+	code, stdout, _ = cli(t, testDeployment, []*fakenode.Node{scenario()}, "epoch", "1000", "--artifacts", filepath.Join(dir, "missing"))
 	if code != 0 {
 		t.Errorf("missing bundle: exit %d, want 0", code)
 	}
@@ -497,14 +499,14 @@ func TestArtifacts_CannotMaskAMismatch(t *testing.T) {
 	// Recompute's own Verdict — MISMATCH, exit 1 — is what the run exits with.
 	node := scenario()
 	wrong := chain.Hash{0xbb}
-	node.logs = node.logs[:len(node.logs)-1]
-	node.rootPosted(6008, distributor, 1000, wrong, amounts(1500, 0, 500, 0, 7), amounts(500, 0, 0, 0, 7))
-	l := node.ledgers[1000]
-	l.root, l.totals = wrong, amounts(1500, 0, 500, 0, 7)
-	node.ledgers[1000] = l
+	node.DropLastLog()
+	node.RootPosted(6008, distributor, 1000, wrong, fakenode.Amounts(1500, 0, 500, 0, 7), fakenode.Amounts(500, 0, 0, 0, 7))
+	l := node.Ledgers[1000]
+	l.Root, l.Totals = wrong, fakenode.Amounts(1500, 0, 500, 0, 7)
+	node.Ledgers[1000] = l
 
 	dir := writeBundle(t, fmt.Sprintf(publishedRows, "125"), wrong.String())
-	code, stdout, _ := cli(t, testDeployment, []*fakeNode{node}, "epoch", "1000", "--artifacts", dir)
+	code, stdout, _ := cli(t, testDeployment, []*fakenode.Node{node}, "epoch", "1000", "--artifacts", dir)
 
 	if code != 1 {
 		t.Fatalf("exit %d, want 1", code)
@@ -514,7 +516,7 @@ func TestArtifacts_CannotMaskAMismatch(t *testing.T) {
 	}
 
 	// And an unreadable bundle over the same MISMATCH is still exit 1.
-	code, _, _ = cli(t, testDeployment, []*fakeNode{node}, "epoch", "1000", "--artifacts", filepath.Join(dir, "missing"))
+	code, _, _ = cli(t, testDeployment, []*fakenode.Node{node}, "epoch", "1000", "--artifacts", filepath.Join(dir, "missing"))
 	if code != 1 {
 		t.Errorf("missing bundle: exit %d, want 1", code)
 	}
@@ -523,7 +525,7 @@ func TestArtifacts_CannotMaskAMismatch(t *testing.T) {
 func TestRun_UnpinnedBuildRefusesToRun(t *testing.T) {
 	// The shipped pinned Deployment has no addresses until launch. Exit 2, never a
 	// confident answer about a zero address.
-	code, stdout, _ := cli(t, pinned, []*fakeNode{scenario()}, "epoch", "1000")
+	code, stdout, _ := cli(t, epoch.Pinned(), []*fakenode.Node{scenario()}, "epoch", "1000")
 
 	if code != 2 {
 		t.Fatalf("exit %d, want 2", code)
@@ -556,7 +558,7 @@ func TestRun_UsageErrorsExitTwo(t *testing.T) {
 }
 
 func TestRun_HeaderEchoesTheRate(t *testing.T) {
-	code, stdout, _ := cli(t, testDeployment, []*fakeNode{scenario()}, "sync")
+	code, stdout, _ := cli(t, testDeployment, []*fakenode.Node{scenario()}, "sync")
 	if code != 0 {
 		t.Fatal(code)
 	}

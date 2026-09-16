@@ -1,4 +1,4 @@
-package main
+package epoch
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"math"
 	"math/big"
 
-	"github.com/nutzwtf/nutz-verify/internal/chain"
+	"github.com/nutzwtf/nutz-verify/chain"
 	"github.com/nutzwtf/nutz-verify/internal/twab"
 )
 
@@ -15,7 +15,7 @@ import (
 // previous Root having been posted an hour ago. Each further page doubles.
 const searchSpan = 40_000
 
-// book memoizes the Distributor's ledger() reads for one run, all pinned to one block.
+// book memoizes the Distributor's ledger() reads for one Engine, all pinned to its tip.
 //
 // The tip rather than each Root's own block, and that is safe: funded[] cannot change
 // once a Root is posted (notifyEpochFunding requires the Epoch to be past the mark), a
@@ -79,8 +79,8 @@ func (b *book) stands(ctx context.Context, posted chain.RootPosted) (bool, error
 // The two sources have to agree: a ledger holding a Root that no log in the range posted
 // is an endpoint that has not served the log it should have, and is an error rather than
 // "no Root".
-func (v *verifier) standingRoot(ctx context.Context, id, from, to uint64) (*chain.RootPosted, error) {
-	l, err := v.book.ledger(ctx, id)
+func (e *Engine) standingRoot(ctx context.Context, id, from, to uint64) (*chain.RootPosted, error) {
+	l, err := e.book.ledger(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -90,10 +90,10 @@ func (v *verifier) standingRoot(ctx context.Context, id, from, to uint64) (*chai
 
 	if from > to {
 		return nil, fmt.Errorf("epoch %d has a Root in the ledger, but the %s head is block %d and the Epoch closes at block %d",
-			id, v.opts.finality, to, from-1)
+			id, e.tip.Finality, to, from-1)
 	}
 
-	roots, err := v.reader.Roots(ctx, from, to)
+	roots, err := e.reader.Roots(ctx, from, to)
 	if err != nil {
 		return nil, err
 	}
@@ -123,15 +123,15 @@ func (v *verifier) standingRoot(ctx context.Context, id, from, to uint64) (*chai
 // afford a year of them to find the one an hour ago (spec §9). From the tip and not from
 // the target's end block because Roots are posted in order, so the previous Epoch's can
 // have been posted late, after the target closed.
-func (v *verifier) previousRoot(ctx context.Context, target, tip uint64) (chain.RootPosted, bool, error) {
+func (e *Engine) previousRoot(ctx context.Context, target uint64) (chain.RootPosted, bool, error) {
 	bound := target
 
-	return v.searchBack(ctx, tip, func(posted chain.RootPosted) (bool, error) {
+	return e.searchBack(ctx, func(posted chain.RootPosted) (bool, error) {
 		if posted.Kind != chain.KindEpoch || posted.ID >= bound {
 			return false, nil
 		}
 
-		ok, err := v.book.stands(ctx, posted)
+		ok, err := e.book.stands(ctx, posted)
 		if err != nil || ok {
 			return ok, err
 		}
@@ -144,38 +144,39 @@ func (v *verifier) previousRoot(ctx context.Context, target, tip uint64) (chain.
 	})
 }
 
-// latestEpoch is the Epoch of the most recent standing Root.
-func (v *verifier) latestEpoch(ctx context.Context, tip chain.Tip) (uint64, error) {
-	posted, found, err := v.searchBack(ctx, tip.Block.Number, func(posted chain.RootPosted) (bool, error) {
+// Latest is the Epoch of the most recent standing Root at the tip: what the Dispute-window
+// default recomputes. An error when no Root stands at this finality.
+func (e *Engine) Latest(ctx context.Context) (uint64, error) {
+	posted, found, err := e.searchBack(ctx, func(posted chain.RootPosted) (bool, error) {
 		if posted.Kind != chain.KindEpoch {
 			return false, nil
 		}
 
-		return v.book.stands(ctx, posted)
+		return e.book.stands(ctx, posted)
 	})
 	if err != nil {
 		return 0, err
 	}
 	if !found {
-		return 0, fmt.Errorf("no Root has been posted at %s finality", v.opts.finality)
+		return 0, fmt.Errorf("no Root has been posted at %s finality", e.tip.Finality)
 	}
 
 	return posted.ID, nil
 }
 
-// searchBack walks the RootPosted stream backwards from upper in widening pages, stopping
-// at the first log — newest first — that want accepts.
-func (v *verifier) searchBack(ctx context.Context, upper uint64, want func(chain.RootPosted) (bool, error)) (chain.RootPosted, bool, error) {
-	floor := v.dep.DistributorBlock
+// searchBack walks the RootPosted stream backwards from the tip in widening pages,
+// stopping at the first log — newest first — that want accepts.
+func (e *Engine) searchBack(ctx context.Context, want func(chain.RootPosted) (bool, error)) (chain.RootPosted, bool, error) {
+	floor := e.dep.DistributorBlock
 	span := uint64(searchSpan)
 
-	for hi := upper; hi >= floor; {
+	for hi := e.tip.Block.Number; hi >= floor; {
 		lo := floor
 		if hi-floor > span {
 			lo = hi - span
 		}
 
-		roots, err := v.reader.Roots(ctx, lo, hi)
+		roots, err := e.reader.Roots(ctx, lo, hi)
 		if err != nil {
 			return chain.RootPosted{}, false, err
 		}
@@ -204,10 +205,10 @@ func (v *verifier) searchBack(ctx context.Context, upper uint64, want func(chain
 }
 
 // standingRoots is every standing Epoch Root in [first, last), from the whole stream.
-// This is --chain's read, and it is the one spec §7 says the Dispute window does not
-// afford: a header per Root, from deploy.
-func (v *verifier) standingRoots(ctx context.Context, first, last, tip uint64) (map[uint64]chain.RootPosted, error) {
-	roots, err := v.reader.Roots(ctx, v.dep.DistributorBlock, tip)
+// This is Walk's read, and it is the one spec §7 says the Dispute window does not afford:
+// a header per Root, from deploy.
+func (e *Engine) standingRoots(ctx context.Context, first, last uint64) (map[uint64]chain.RootPosted, error) {
+	roots, err := e.reader.Roots(ctx, e.dep.DistributorBlock, e.tip.Block.Number)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +219,7 @@ func (v *verifier) standingRoots(ctx context.Context, first, last, tip uint64) (
 			continue
 		}
 
-		ok, err := v.book.stands(ctx, posted)
+		ok, err := e.book.stands(ctx, posted)
 		if err != nil {
 			return nil, err
 		}
@@ -234,11 +235,19 @@ func (v *verifier) standingRoots(ctx context.Context, first, last, tip uint64) (
 
 // deployEpoch is the first Epoch the Distributor can have been funded for: the one its
 // deploy block falls in. The mark starts one before it, so nothing earlier is fundable.
-func (v *verifier) deployEpoch(ctx context.Context) (uint64, error) {
-	deployed, err := v.reader.BlockByNumber(ctx, v.dep.DistributorBlock)
+// One header read, memoized.
+func (e *Engine) deployEpoch(ctx context.Context) (uint64, error) {
+	if e.first != nil {
+		return *e.first, nil
+	}
+
+	deployed, err := e.reader.BlockByNumber(ctx, e.dep.DistributorBlock)
 	if err != nil {
 		return 0, err
 	}
 
-	return uint64(deployed.Timestamp / twab.EpochSeconds), nil
+	first := uint64(deployed.Timestamp / twab.EpochSeconds)
+	e.first = &first
+
+	return first, nil
 }

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nutzwtf/nutz-verify/internal/merkle"
+	"github.com/nutzwtf/nutz-verify/merkle"
 )
 
 // Values a static serialiser could otherwise truncate into a wrong but valid leaf.
@@ -132,7 +132,7 @@ func describe(c merkle.Claim) string {
 
 // Fixtures come from @openzeppelin/merkle-tree v1.0.8 (see tooling/), never from this
 // package, which would only prove the port agrees with itself.
-const fixtureDir = "../../testdata/merkle"
+const fixtureDir = "../testdata/merkle"
 
 func fixturePath(name string) string { return filepath.Join(fixtureDir, name) }
 
@@ -142,6 +142,8 @@ type fixture struct {
 	ID       string         `json:"id"`
 	Root     string         `json:"root"`
 	Claims   []fixtureClaim `json:"claims"`
+	// Dump is OpenZeppelin's dump() of the same tree, absent from claims.json.
+	Dump json.RawMessage `json:"dump"`
 }
 
 type fixtureClaim struct {

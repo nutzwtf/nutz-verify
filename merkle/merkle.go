@@ -75,16 +75,11 @@ func putUint256(word []byte, x *big.Int) error {
 	return nil
 }
 
-// leafHash double-hashes, so a leaf can never collide with a 64-byte internal node.
-func (c Claim) leafHash() (Hash, error) {
-	encoded, err := c.encode()
-	if err != nil {
-		return Hash{}, err
-	}
-
+// leafHashOf double-hashes, so a leaf can never collide with a 64-byte internal node.
+func leafHashOf(encoded [leafWords * wordSize]byte) Hash {
 	inner := keccak256(encoded[:])
 
-	return keccak256(inner[:]), nil
+	return keccak256(inner[:])
 }
 
 func keccak256(parts ...[]byte) Hash {

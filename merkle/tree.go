@@ -16,9 +16,13 @@ type Tree struct {
 	nodes []Hash
 	// leafAt[i] is the node index of New's i-th claim.
 	leafAt []int
+	// encoded[i] is New's i-th claim as its 224 ABI words: what Dump writes back out, kept
+	// in this form so the Tree shares nothing with the caller's big.Ints.
+	encoded [][leafWords * wordSize]byte
 }
 
-// New builds the tree over claims. It does not retain them.
+// New builds the tree over claims. It keeps their encoded form, for Dump, and nothing the
+// caller could mutate.
 func New(claims []Claim) (*Tree, error) {
 	if len(claims) == 0 {
 		return nil, ErrNoClaims
@@ -31,12 +35,14 @@ func New(claims []Claim) (*Tree, error) {
 	}
 
 	leaves := make([]hashed, 0, len(claims))
+	encoded := make([][leafWords * wordSize]byte, 0, len(claims))
 	for i, c := range claims {
-		h, err := c.leafHash()
+		e, err := c.encode()
 		if err != nil {
 			return nil, fmt.Errorf("merkle: claim %d: %w", i, err)
 		}
-		leaves = append(leaves, hashed{hash: h, claimIndex: i})
+		leaves = append(leaves, hashed{hash: leafHashOf(e), claimIndex: i})
+		encoded = append(encoded, e)
 	}
 
 	// Ascending by hash; stable, so repeated claims still map deterministically.
@@ -45,8 +51,9 @@ func New(claims []Claim) (*Tree, error) {
 	})
 
 	t := &Tree{
-		nodes:  make([]Hash, 2*len(claims)-1),
-		leafAt: make([]int, len(claims)),
+		nodes:   make([]Hash, 2*len(claims)-1),
+		leafAt:  make([]int, len(claims)),
+		encoded: encoded,
 	}
 
 	// Leaves fill the tail back to front, so the first sorted leaf lands last.

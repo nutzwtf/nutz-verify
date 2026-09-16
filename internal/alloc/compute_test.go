@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/nutzwtf/nutz-verify/internal/alloc"
-	"github.com/nutzwtf/nutz-verify/internal/merkle"
 	"github.com/nutzwtf/nutz-verify/internal/twab"
+	"github.com/nutzwtf/nutz-verify/merkle"
 )
 
 var (

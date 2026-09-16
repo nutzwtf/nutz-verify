@@ -37,5 +37,48 @@
       ],
       "leaf": "0x325518894470bbecc3e72d46125014d6f613c119f476e6f93d92579b5e7da63c"
     }
-  ]
+  ],
+  "dump": {
+    "format": "standard-v1",
+    "leafEncoding": [
+      "uint256",
+      "address",
+      "uint256[5]"
+    ],
+    "tree": [
+      "0xfed22f9a5f07640c83fcfcd8e673f602abccd0d01a6dc8944703a0b81dac6ede",
+      "0xc1fa6eea27e946d8fa255fde4b30056db0130e48ae8231cd7ef95066f025e957",
+      "0x325518894470bbecc3e72d46125014d6f613c119f476e6f93d92579b5e7da63c"
+    ],
+    "values": [
+      {
+        "value": [
+          "2",
+          "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          [
+            "1",
+            "0",
+            "0",
+            "0",
+            "0"
+          ]
+        ],
+        "treeIndex": 1
+      },
+      {
+        "value": [
+          "2",
+          "0xcccccccccccccccccccccccccccccccccccccccc",
+          [
+            "0",
+            "0",
+            "0",
+            "0",
+            "1"
+          ]
+        ],
+        "treeIndex": 2
+      }
+    ]
+  }
 }

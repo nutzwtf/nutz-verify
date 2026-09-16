@@ -11,10 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/nutzwtf/nutz-verify/internal/alloc"
-	"github.com/nutzwtf/nutz-verify/internal/chain"
+	"github.com/nutzwtf/nutz-verify/chain"
+	"github.com/nutzwtf/nutz-verify/epoch"
 	"github.com/nutzwtf/nutz-verify/internal/report"
-	"github.com/nutzwtf/nutz-verify/internal/twab"
 )
 
 // The files of a published epochs/<id>/ bundle this compares (engineering spec §4.5).
@@ -116,7 +115,7 @@ func (d decimal) value() *big.Int {
 // that cannot be read is reported as such in its own section; it does not return an
 // error, because an error would become INDETERMINATE and let a bad bundle hide a
 // MISMATCH behind an exit 2.
-func compareArtifacts(path string, result alloc.Result) report.Artifacts {
+func compareArtifacts(path string, result epoch.Result) report.Artifacts {
 	out, err := diffBundle(path, result)
 	if err != nil {
 		return report.Artifacts{Path: path, Error: err.Error()}
@@ -125,7 +124,7 @@ func compareArtifacts(path string, result alloc.Result) report.Artifacts {
 	return out
 }
 
-func diffBundle(path string, result alloc.Result) (report.Artifacts, error) {
+func diffBundle(path string, result epoch.Result) (report.Artifacts, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return report.Artifacts{}, err
@@ -195,11 +194,11 @@ func readRoot(path string) (chain.Hash, bool, error) {
 
 // diffRows is the first difference between the published rows and the recomputed
 // Allocations, both ascending by address, or "" when they agree.
-func diffRows(published []artifactRow, recomputed []alloc.Allocation) string {
+func diffRows(published []artifactRow, recomputed []epoch.Allocation) string {
 	for i := range max(len(published), len(recomputed)) {
 		if i >= len(published) {
 			return fmt.Sprintf("row %d: the bundle ends after %d rows, and the Recompute has %d (next is %s)",
-				i, len(published), len(recomputed), chain.Address(recomputed[i].Account))
+				i, len(published), len(recomputed), recomputed[i].Account)
 		}
 		if i >= len(recomputed) {
 			return fmt.Sprintf("row %d (%s): the Recompute ends after %d rows, and the bundle has %d",
@@ -207,8 +206,8 @@ func diffRows(published []artifactRow, recomputed []alloc.Allocation) string {
 		}
 
 		p, r := published[i], recomputed[i]
-		if twab.Address(p.Account) != r.Account {
-			return fmt.Sprintf("row %d: published account %s, recomputed %s", i, p.Account, chain.Address(r.Account))
+		if p.Account != r.Account {
+			return fmt.Sprintf("row %d: published account %s, recomputed %s", i, p.Account, r.Account)
 		}
 		for t := range p.Amounts {
 			if p.Amounts[t].Cmp(r.Amounts[t]) != 0 {
@@ -227,12 +226,12 @@ func diffRows(published []artifactRow, recomputed []alloc.Allocation) string {
 	return ""
 }
 
-func diffRoot(published chain.Hash, result alloc.Result) string {
+func diffRoot(published chain.Hash, result epoch.Result) string {
 	switch {
 	case !result.HasRoot:
 		return fmt.Sprintf("root.txt is %s, and the Recompute posts no Root", published)
-	case published != chain.Hash(result.Root):
-		return fmt.Sprintf("root.txt is %s, recomputed %s", published, chain.Hash(result.Root))
+	case published != result.Root:
+		return fmt.Sprintf("root.txt is %s, recomputed %s", published, result.Root)
 	default:
 		return ""
 	}

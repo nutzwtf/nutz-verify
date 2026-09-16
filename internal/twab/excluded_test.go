@@ -8,7 +8,7 @@ import (
 )
 
 // Replay's own tests cover what the Excluded set does to a Holder. These cover the shape of
-// the set itself, because it is exported and internal/chain hashes it: engineering spec
+// the set itself, because it is exported and chain hashes it: engineering spec
 // §4.5's exclusion set hash is over abi.encodePacked(set), so the ordering and the
 // de-duplication below are load-bearing rather than cosmetic, and a hash over a bag would be
 // no hash at all.

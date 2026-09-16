@@ -12,8 +12,8 @@ import (
 	"testing"
 
 	"github.com/nutzwtf/nutz-verify/internal/alloc"
-	"github.com/nutzwtf/nutz-verify/internal/merkle"
 	"github.com/nutzwtf/nutz-verify/internal/twab"
+	"github.com/nutzwtf/nutz-verify/merkle"
 )
 
 // The Cases are an interface, not internal scaffolding: ADR-0003 has the private indexer's

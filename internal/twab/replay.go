@@ -122,7 +122,7 @@ func sortedByTimestamp(transfers []Transfer) []Transfer {
 //
 // Ascending by address and de-duplicated. That is not presentation: engineering spec §4.5
 // hashes the set with abi.encodePacked, which is order-sensitive, so "the set" has to mean
-// one byte string and not a bag. internal/chain computes that hash over exactly this order —
+// one byte string and not a bag. chain computes that hash over exactly this order —
 // the rule lives here, with the other rules the Cases pin (ADR-0003), and is not restated
 // there.
 //

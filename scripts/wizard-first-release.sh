@@ -299,7 +299,7 @@ else
     warn "endpoint answered eth_chainId '$got', expected $CHAIN_ID_HEX (4663)"
     confirm "Set it anyway?" || exit 1
   fi
-  write_env NUTZ_VERIFY_LIVE_RPC_2 "$RPC_4663"     # what internal/chain's live test reads
+  write_env NUTZ_VERIFY_LIVE_RPC_2 "$RPC_4663"     # what chain's live test reads
   set_secret RPC_4663 "$RPC_4663"                  # what ci.yml maps onto it
 fi
 pause

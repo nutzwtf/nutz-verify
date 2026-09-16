@@ -9,15 +9,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nutzwtf/nutz-verify/internal/cache"
-	"github.com/nutzwtf/nutz-verify/internal/chain"
+	"github.com/nutzwtf/nutz-verify/cache"
+	"github.com/nutzwtf/nutz-verify/chain"
 )
 
 // The load test. Spec §10: "point ingestion at USDG history on 4663. At ~100 ms blocks the
 // real risk is volume, and this is the only way to learn before launch whether a
 // from-scratch sync takes minutes or hours."
 //
-// Opt-in via NUTZ_VERIFY_LIVE_RPC, like internal/chain's live tests, because it reads a
+// Opt-in via NUTZ_VERIFY_LIVE_RPC, like chain's live tests, because it reads a
 // public endpoint somebody else pays for. NUTZ_VERIFY_LOAD_BLOCKS sets how many blocks of
 // history to sync (default loadBlocks); the numbers it prints are what spec §9 records.
 
@@ -49,7 +49,7 @@ func (c *counting) RoundTrip(r *http.Request) (*http.Response, error) {
 	return c.next.RoundTrip(r)
 }
 
-// throttled mirrors internal/chain's helper of the same name (a _test.go cannot be imported):
+// throttled mirrors chain's helper of the same name (a _test.go cannot be imported):
 // the endpoint refused us rather than failed, and a third party's quota is not something a
 // test can assert about.
 func throttled(err error) bool {
@@ -117,7 +117,7 @@ func TestLive_SyncUSDGHistory(t *testing.T) {
 	})
 	elapsed := time.Since(started)
 	if err != nil {
-		// A refusal is the endpoint's budget, not a Sync bug: internal/chain's live tests
+		// A refusal is the endpoint's budget, not a Sync bug: chain's live tests
 		// skip on the same signal, and the first nightly proved this one has to as well —
 		// the public endpoint answered 429 at 15,676 records. The rate up to that point is
 		// still the measurement, so it is logged before the skip.

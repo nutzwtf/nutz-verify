@@ -122,7 +122,7 @@ jobs:
           NUTZ_VERIFY_REQUIRE_FORK: "1"
           NUTZ_VERIFY_FORK_RPC: ${{ env.PUBLIC_4663 }}
           NUTZ_CONTRACTS: ${{ github.workspace }}/nutz-contracts
-        run: go test -count=1 -v -timeout 900s -run TestAnvil ./internal/chain/
+        run: go test -count=1 -v -timeout 900s -run TestAnvil ./chain/
 
   live:
     name: live (real 4663, two providers)
@@ -142,11 +142,11 @@ jobs:
         env:
           NUTZ_VERIFY_LIVE_RPC: ${{ env.PUBLIC_4663 }}
           NUTZ_VERIFY_LIVE_RPC_2: ${{ secrets.RPC_4663 }}
-        run: go test -count=1 -v -timeout 600s -run TestLive ./internal/chain/
+        run: go test -count=1 -v -timeout 600s -run TestLive ./chain/
       # The load test: a slice of USDG history synced into a throwaway Cache through the real
       # Reader, printing blocks per second and what that extrapolates to. Spec §9 records the
       # numbers; this is where they come from, and where a regression in the sync rate shows.
       - name: sync a slice of USDG history
         env:
           NUTZ_VERIFY_LIVE_RPC: ${{ env.PUBLIC_4663 }}
-        run: go test -count=1 -v -timeout 900s -run TestLive ./internal/cache/
+        run: go test -count=1 -v -timeout 900s -run TestLive ./cache/
