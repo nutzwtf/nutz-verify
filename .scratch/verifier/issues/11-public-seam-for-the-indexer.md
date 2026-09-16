@@ -1,6 +1,6 @@
 # 11 — The public seam: nutz-verify becomes the indexer's engine
 
-Status: ready-for-agent
+Status: resolved
 Type: task
 Blocked by: —
 Spec: ../spec.md §3; engineering spec §1 (v0.6, nutz-contracts ticket `engineering-spec/01`); nutz-platform `.scratch/indexer/spec.md`
@@ -187,3 +187,5 @@ because the search costs a header per Epoch and no link's report shows it. Relea
 from `scripts/build-release.sh` at this tree (GOTOOLCHAIN=local, go1.26.5): linux_amd64
 `d817a9f7…96c3f6`, linux_arm64 `f5963962…a4cd32`, darwin_amd64 `e5ab95ef…7472510`,
 darwin_arm64 `adeb2302…0bfc436`. Left for the human: commit, merge, tag v0.2.0.
+
+**2026-09-16, resolved.** Engine merged to main (a2f3a49, CI green); docs and ADR-0006 committed; tagged v0.2.0.

@@ -26,8 +26,9 @@ audiences rely on that:
   voided. Anyone can download the binary and check the arithmetic, which is why it needs no
   key, no account and no config file.
 - **The spec.** This is the normative implementation of the payout rules
-  ([ADR-0003](docs/adr/0003-normativity-split.md)). The private indexer must produce
-  byte-identical Roots to it, and any rule change lands here first.
+  ([ADR-0003](docs/adr/0003-normativity-split.md)), and the private indexer links it as its
+  engine ([ADR-0006](docs/adr/0006-nutz-verify-is-the-indexers-engine.md)), so the Roots it
+  posts are byte-identical to this binary's by construction. Any rule change lands here first.
 
 Hence the care over reproducible builds: the tool is worth exactly as much as a stranger's
 ability to confirm that the binary gating the signature is the code they can read.
@@ -134,7 +135,7 @@ A Verifier that oversells what it proves is worse than a narrow one
   it. **A local node is the only true fix**: run your own chain 4663 node and point `--rpc` at
   it, and the Verifier trusts nobody you do not.
 - **It trusts its pinned addresses.** The Distributor, token and `DEV_WALLET` are constants in
-  [`cmd/nutz-verify/deployment.go`](cmd/nutz-verify/deployment.go) and echoed in every header,
+  [`epoch/deployment.go`](epoch/deployment.go) and echoed in every header,
   so what you are trusting is in front of you; check them against the addresses published on
   nutz.wtf. A MATCH against the wrong Distributor is a MATCH about nothing.
 - **It does not judge the funding.** The cap Assertion bounds `totals` by what the Distributor
@@ -144,3 +145,9 @@ A Verifier that oversells what it proves is worse than a narrow one
 - **It does not prove the Root is Final.** MATCH says the arithmetic is right at the requested
   finality level. A Root can still be voided inside its Dispute window, and an Epoch below the
   requested finality is INDETERMINATE, not MATCH.
+- **It does not independently re-derive the rules.** The private indexer that posts the Root
+  links this module and runs the same Engine, from the same tag
+  ([ADR-0006](docs/adr/0006-nutz-verify-is-the-indexers-engine.md)). What a MATCH from a
+  separate host, with its own endpoints and its own Cache, does catch is a compromised keeper,
+  bad RPC data or a tampered Bundle. A bug in the shared rules is caught by the Cases, not by
+  MATCH, and is bounded by the per-Epoch cap.

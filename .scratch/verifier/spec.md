@@ -19,18 +19,25 @@ Recompute any Epoch from public chain data and report a Verdict against the on-c
 ## 3. Layout
 
 ```
-cmd/nutz-verify/              the CLI
-internal/chain/               JSON-RPC, log decoding, excluded-set reconstruction
-internal/cache/               append-only log, CRC32C, truncate-on-open, reorg truncate
+cmd/nutz-verify/              the CLI: flags, the four Assertions on a Result, --artifacts, output
+epoch/                        public — the Engine: Deployment, Sync, Compute, Walk, Latest, Result
+chain/                        public — JSON-RPC, log decoding, excluded-set reconstruction
+cache/                        public — append-only log, CRC32C, truncate-on-open, reorg truncate
+merkle/                       public — StandardMerkleTree port, OpenZeppelin dump
 internal/twab/                balance replay and time-weighted average balance
-internal/alloc/              streaks, multipliers, weights, per-token allocation
-internal/merkle/              StandardMerkleTree port
+internal/alloc/               streaks, multipliers, weights, per-token allocation
 internal/report/              Verdicts, four Assertions, human and --json output
-testdata/cases/               hermetic Cases (ADR-0003); consumed by the private indexer's CI too
-testdata/merkle/              tree fixtures, seeded from nutz-contracts/test/fixtures/claims.json
+internal/fakenode/            a JSON-RPC server for the tests: the system boundary they mock
+testdata/cases/               hermetic Cases (ADR-0003); the private indexer runs them through the Engine too
+testdata/merkle/              tree fixtures and dumps, seeded from nutz-contracts/test/fixtures/claims.json
 ```
 
-Module `github.com/nutzwtf/nutz-verify`. Everything under `internal/` — the Signer execs the binary, so there is no public Go API to keep stable. Conservative `go` directive so a distro toolchain builds it. MIT.
+Module `github.com/nutzwtf/nutz-verify`. The public packages are a versioned API with one
+consumer, the private indexer, which pins an exact tag and records it in every Bundle; the
+Signer's binary is built from that same tag (ADR-0006). `epoch` is the one door for the
+rules: it defines its own `Result` and nothing under `internal/` reaches a public signature.
+`twab`, `alloc` and `report` stay internal — the rules land as Cases, not as API.
+Conservative `go` directive so a distro toolchain builds it. MIT.
 
 ## 4. Inputs
 
@@ -57,7 +64,7 @@ The distinction is the difference between a working Verifier and one that fails 
 only: a range cap is a constant you can page under, while a result cap depends on how busy the
 token is. USDG runs at **4.9–5.4 `Transfer` logs per block**, so a 2,000-block page is ~9,750–13,500
 logs — straddling the cap. A fixed page would pass every test and then fail intermittently against
-the endpoint a hostile stranger is most likely to be using. `internal/chain` therefore opens at
+the endpoint a hostile stranger is most likely to be using. `chain` therefore opens at
 2,000 blocks and **halves on refusal**, which needs no constant to be right.
 
 Two further properties of that endpoint, both relevant to §9 and §10:
@@ -162,13 +169,13 @@ field, and it is **`0x0` on every log at every height**, so the header join cann
 it answers **HTTP 403 to `Python-urllib`'s User-Agent** before any limit applies, which is a bot
 filter and not a quota (Go's and curl's agents pass).
 
-**What `internal/chain` now does.** Headers go out in **JSON-RPC batches of 20** (an endpoint that
+**What `chain` now does.** Headers go out in **JSON-RPC batches of 20** (an endpoint that
 refuses batches is asked one at a time from then on), and every endpoint is **paced by a client-side
 token bucket** at `DefaultCallsPerSecond = 15`, counting each request inside a batch, two batches in
 flight. The 429 retry stays as the safety net. A keyed provider allows more and `--rate` (ticket 05)
 raises it; the default is sized for the endpoint a hostile stranger will use.
 
-**The load test** (`internal/cache`, `TestLive_SyncUSDGHistory`, nightly). 5,000 blocks of USDG
+**The load test** (`cache`, `TestLive_SyncUSDGHistory`, nightly). 5,000 blocks of USDG
 history at the tip, blocks 63,182,650–63,187,649, synced from scratch into a throwaway Cache
 through the real `Reader`:
 

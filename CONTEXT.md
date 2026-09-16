@@ -35,3 +35,7 @@ _Avoid_: fixture (ambiguous with the Merkle fixtures inherited from `nutz-contra
 **Cross-check**:
 Running a Recompute against several independent RPC endpoints and treating disagreement as INDETERMINATE.
 _Avoid_: consensus, quorum
+
+**Engine**:
+The one code path that reads the chain and rebuilds an Epoch's Allocations, `totals`, Carry and Root. A Recompute is the Engine's output compared against the chain; the private indexer's Bundle is the Engine's output written out.
+_Avoid_: library, facade, core (implementation words for the same thing)

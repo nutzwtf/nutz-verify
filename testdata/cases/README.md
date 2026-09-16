@@ -7,8 +7,9 @@ is a JSON file and an integer-arithmetic problem.
 ADR-0003 makes the allocation rules of engineering spec §4.1–4.5 normative **in this repo**:
 if the private indexer disagrees with what is written here, the indexer is the bug. This
 directory is the operational form of that claim. Go runs it as a table test in
-`internal/alloc`, and **the private indexer's CI consumes the same directory and fails on
-divergence**, so the format below is an interface, not internal scaffolding. Renaming or
+`internal/alloc` and again through the Engine in `epoch`, and **the private indexer links
+this module and runs the same directory through the Engine in its CI**, so the format below
+is an interface, not internal scaffolding. Renaming or
 removing a field breaks that consumer. Adding one is safe for the consumer but not for the Go
 runner, which rejects unknown fields on purpose — a mistyped `carryout` would otherwise pass
 as a zero — so a new field must land in `testCase` in `internal/alloc/cases_test.go` in the
@@ -103,7 +104,7 @@ A Case carries timestamps, never blocks. Spec §5 also fixes *which* blocks a Re
 — "the end block is the last block with `timestamp < 3600(e+1)`" — and no hermetic fixture can
 express that. A chain reader that stopped at the end block's timestamp instead of the Epoch
 boundary would compute every Case here correctly and still be wrong on chain, so that half of
-the resolution belongs to `internal/chain` and its own tests.
+the resolution belongs to `chain` and its own tests.
 
 Three of the TWAB Cases share the root `0x67ba…623e`, because all three end with the same
 two allocations. That is the point of them — three different readings of the window converge

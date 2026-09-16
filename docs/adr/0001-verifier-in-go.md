@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted, amended by ADR-0006 (the implementation-independence argument no longer holds; the static-binary one does)
 date: 2026-09-14
 ---
 
