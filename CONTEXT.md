@@ -29,7 +29,7 @@ Which chain tip a Recompute reads history at — `latest`, `safe` or `finalized`
 _Avoid_: confirmations, depth
 
 **Case**:
-One hermetic allocation fixture: inputs and expected Allocations, `totals` and Root, with no RPC. The unit in which a rule change lands, and the artifact the private indexer's CI consumes.
+One hermetic allocation fixture: inputs and expected Allocations, `totals` and Root, with no RPC. The unit in which a rule change lands; the private indexer picks it up by pinning the tag whose CI ran it, since it runs the same Engine.
 _Avoid_: fixture (ambiguous with the Merkle fixtures inherited from `nutz-contracts`), golden file, test vector
 
 **Cross-check**:

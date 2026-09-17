@@ -144,7 +144,9 @@ against it structurally — `load()` is the contract, not `JSON.stringify`'s lay
   error message. (Ticket 06's pin is the binary's checksum on the Signer host, not the
   Deployment, and is untouched.)
 - `testdata/cases/README.md`: the consumer sentence becomes "the private indexer links this
-  module and runs the same directory through the Engine in its CI".
+  module at a pinned tag", and ADR-0003's CI-consumer claim is retired in ADR-0006: with one
+  code path there is nothing to diverge, and the fake node the Engine's Cases test needs is
+  internal anyway. (Corrected 2026-09-17; the grilling had kept the old wording.)
 - `testdata/merkle/README.md`: the generated fixtures now carry OZ's `dump`.
 
 ## Release
@@ -183,9 +185,19 @@ Two deviations from the grilled text, both in the Engine's favour: `Compute` and
 the end block before syncing the Cache, as the CLI did, so an Epoch not yet closed is
 INDETERMINATE without a sync; the CLI reads the Cache status back through `Engine.Synced()`
 instead of calling `Sync` first. `Result.EndBlock` is a pointer, nil on Walk's earlier links,
-because the search costs a header per Epoch and no link's report shows it. Release checksums
-from `scripts/build-release.sh` at this tree (GOTOOLCHAIN=local, go1.26.5): linux_amd64
-`d817a9f7…96c3f6`, linux_arm64 `f5963962…a4cd32`, darwin_amd64 `e5ab95ef…7472510`,
-darwin_arm64 `adeb2302…0bfc436`. Left for the human: commit, merge, tag v0.2.0.
+because the search costs a header per Epoch and no link's report shows it. Merged to main as
+a2f3a49 and CI green (run 35156670497: go, every target, the anvil harness). Release
+checksums from `scripts/build-release.sh` at that tree with the toolchain line's go1.26.8,
+which is what release.yml must reproduce:
+
+    4e7f632b04bc1d346c83402f6d93a8fcadeb90a36d4731ea066547057be5e7e1  nutz-verify_linux_amd64
+    0b822f2c8bba0a1c253f5a67c7738ffeb34a5149deb5d2933c9a1e52023625b3  nutz-verify_linux_arm64
+    b3cd628ad61c781c669300b91995ca8c7f266a091d995b6aa5693182ab08634e  nutz-verify_darwin_amd64
+    ff6ed5a25794d0787cbbe383c62ec790da827b2f9ce8eec15820ab5ce6af8c63  nutz-verify_darwin_arm64
+
+(An earlier note here carried go1.26.5 values, which are not the release's.) v0.2.0 was
+tagged on the docs commit d7d7856; the docs do not enter the binary, and release run
+35157760770 published SHA256SUMS identical to the four lines above, reproduced here on a
+third machine.
 
 **2026-09-16, resolved.** Engine merged to main (a2f3a49, CI green); docs and ADR-0006 committed; tagged v0.2.0.

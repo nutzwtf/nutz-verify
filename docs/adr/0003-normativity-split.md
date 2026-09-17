@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted, amended by ADR-0006 (the indexer no longer runs the Cases in its own CI; it links the Engine)
 date: 2026-09-14
 ---
 

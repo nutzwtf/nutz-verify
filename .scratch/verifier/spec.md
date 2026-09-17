@@ -216,7 +216,7 @@ difference between this and the first attempt, which earned a 429 71 calls in an
 
 ## 10. Testing
 
-- **Cases** (`testdata/cases/`) for every §5 rule, hermetic, no RPC. Engineering spec §7 files these under "Indexer"; that contradicts §1 and §12 P0 and is wrong. They live here and the private indexer's CI consumes them.
+- **Cases** (`testdata/cases/`) for every §5 rule, hermetic, no RPC. Engineering spec §7 files these under "Indexer"; that contradicts §1 and §12 P0 and is wrong. They live here, and the private indexer runs the same Engine at a pinned tag, so it needs no copy (ADR-0006).
 - **Merkle fixtures** seeded from `nutz-contracts/test/fixtures/claims.json` (root `0x88b4…7591`), grown here with odd leaf counts, a single leaf and duplicate amounts.
 - **Anvil harness**: fork 4663, run `nutz-contracts/script/Deploy.s.sol`, deploy a stand-in ERC-20, drive transfers and `postRoot`, verify end to end. The only way to test the chain-facing code before launch, and the thing that justifies hand-rolled decoding (ADR-0004).
 - **Load test**: point ingestion at USDG history on 4663. Done in ticket 04, nightly since; the answer is in §9, and it is weeks on the public endpoint, not minutes or hours.

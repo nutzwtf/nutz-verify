@@ -8,8 +8,9 @@ ADR-0003 makes the allocation rules of engineering spec §4.1–4.5 normative **
 if the private indexer disagrees with what is written here, the indexer is the bug. This
 directory is the operational form of that claim. Go runs it as a table test in
 `internal/alloc` and again through the Engine in `epoch`, and **the private indexer links
-this module and runs the same directory through the Engine in its CI**, so the format below
-is an interface, not internal scaffolding. Renaming or
+this module at a pinned tag**, so a rule lands here as a Case and reaches the indexer as a
+version bump (ADR-0006). The format below is still an interface, not internal scaffolding:
+a Case is what a reviewer, and the spec's owner, reads a rule from. Renaming or
 removing a field breaks that consumer. Adding one is safe for the consumer but not for the Go
 runner, which rejects unknown fields on purpose — a mistyped `carryout` would otherwise pass
 as a zero — so a new field must land in `testCase` in `internal/alloc/cases_test.go` in the
