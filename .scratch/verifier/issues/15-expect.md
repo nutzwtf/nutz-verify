@@ -51,3 +51,22 @@ and `carryIn` is the expected value with its provenance — there is no posted v
 and the Signer compares the report's `recomputed` values with the request's. `CONTEXT.md` gains
 **Expectation**; ADR-0002 is amended rather than superseded, since the four lines and the
 three Verdicts stand and only "no Root posted yet" gains a way out.
+
+**2026-09-20, released.** Committed as 5f55cc1, CI green (run 35536137681: go, every target,
+the anvil harness). Tagged v0.3.0 on that commit; release run 35536242170 built it on
+ubuntu-latest and macos-latest with identical checksums, published, and verified the download
+in a clean container. Reproduced from source on two more machines — this host with
+`scripts/build-release.sh`, and a fresh `golang:1.26-bookworm` container from `git archive
+v0.3.0` — both identical to the published SHA256SUMS:
+
+    60f0ed111854ea4dbf9de9f73c983fd6689f9cdbebb2c7f687146b77753cf858  nutz-verify_linux_amd64
+    5e514351bc0dd2194f4ed1dcc92a819b102145d2cc37d0579e89170731a285cd  nutz-verify_linux_arm64
+    805eb98daee740ad86a9a602cbb895c823fc54398ef25d216443028b72ea0f0c  nutz-verify_darwin_amd64
+    77bb48e70e51366eecf8ec4ccb2bb9c47979b41fa30db32a414221b8ede8ca98  nutz-verify_darwin_arm64
+
+In nutz-platform, `nutz-signer check` against the linux/amd64 binary with its sha256 as
+`NUTZ_VERIFY_PIN` and two chain 4663 endpoints: the pin holds, the deployment is not pinned
+yet, endpoints agree on chain 4663, exit 0. Nothing in nutz-platform changes until the wizard
+pins the tag. The docs of this ticket (README, CONTEXT.md **Expectation**, spec §7–8, the
+ADR-0002 amendment) are in the working tree, uncommitted, so the tag predates them; they do
+not enter the binary.
