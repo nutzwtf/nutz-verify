@@ -1,0 +1,103 @@
+{
+  "schema": "nutz-verify-report/1",
+  "command": "epoch",
+  "run": {
+    "chainId": 4663,
+    "distributor": "0x2222222222222222222222222222222222222222",
+    "token": "0x1111111111111111111111111111111111111111",
+    "devWallet": "0xdddddddddddddddddddddddddddddddddddddddd",
+    "finality": "safe",
+    "expected": "0xa100000000000000000000000000000000000000000000000000000000000000",
+    "endpoints": [
+      "endpoint 1 (rpc.example)",
+      "endpoint 2 (archive.example)"
+    ],
+    "callsPerSecond": 15,
+    "tip": {
+      "number": 41000,
+      "hash": "0x4100000000000000000000000000000000000000000000000000000000000000",
+      "lag": 3
+    },
+    "cache": {
+      "dir": "/home/x/.cache/nutz-verify/4663-0x1111111111111111111111111111111111111111",
+      "records": 12345,
+      "through": 40990,
+      "appended": 17,
+      "reorg": {
+        "block": 40980,
+        "dropped": 4
+      },
+      "repaired": "a record that fails its checksum at record 12000; kept 11990 records through block 40800 and dropped 10, which the next sync refetches"
+    }
+  },
+  "verdict": "MATCH",
+  "epochs": [
+    {
+      "id": 1000,
+      "window": {
+        "start": 3600000,
+        "end": 3603600
+      },
+      "endBlock": {
+        "number": 40990,
+        "hash": "0x4000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "holders": 2,
+      "recomputed": {
+        "hasRoot": true,
+        "root": "0xa100000000000000000000000000000000000000000000000000000000000000",
+        "totals": [
+          "1125",
+          "0",
+          "375",
+          "0",
+          "5"
+        ],
+        "carryOut": [
+          "375",
+          "0",
+          "125",
+          "1",
+          "2"
+        ],
+        "totalWeight": "40000",
+        "carryIn": [
+          "500",
+          "0",
+          "0",
+          "0",
+          "7"
+        ]
+      },
+      "expected": "0xa100000000000000000000000000000000000000000000000000000000000000",
+      "assertions": [
+        {
+          "name": "root",
+          "status": "pass",
+          "detail": "0xa100000000000000000000000000000000000000000000000000000000000000, as expected; no Root posted yet"
+        },
+        {
+          "name": "totals",
+          "status": "pass",
+          "detail": "[1125 0 375 0 5] recomputed; nothing posted to compare with"
+        },
+        {
+          "name": "cap",
+          "status": "pass",
+          "detail": "totals <= funded [1000 0 500 1 0] + carryIn [500 0 0 0 7] in every token"
+        },
+        {
+          "name": "carryIn",
+          "status": "pass",
+          "detail": "[500 0 0 0 7] = carryOut of epoch 999; nothing posted to compare with"
+        },
+        {
+          "name": "expected",
+          "status": "n/a",
+          "detail": "no Root posted: the expectation was the root line's comparand"
+        }
+      ],
+      "verdict": "MATCH"
+    }
+  ]
+}

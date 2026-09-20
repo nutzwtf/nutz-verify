@@ -44,6 +44,11 @@ type Run struct {
 	DevWallet   string `json:"devWallet"`
 	Finality    string `json:"finality"`
 
+	// Expected is the Root expected with --expect, echoed here because it is the one
+	// input to a run that came from neither the chain nor the build: shown, not buried.
+	// Empty when none was given.
+	Expected string `json:"expected,omitempty"`
+
 	// Endpoints are named by position and host, never by URL: a provider URL's path is
 	// routinely an API key, and this document gets pasted into issues.
 	Endpoints      []string `json:"endpoints"`
@@ -96,7 +101,8 @@ type Epoch struct {
 	Holders int `json:"holders"`
 
 	Recomputed Recomputed  `json:"recomputed"`
-	Posted     *PostedRoot `json:"posted,omitempty"` // nil when no Root is posted
+	Posted     *PostedRoot `json:"posted,omitempty"`   // nil when no Root is posted
+	Expected   string      `json:"expected,omitempty"` // the Expectation for this Epoch; empty when none
 	Skipped    bool        `json:"skipped,omitempty"`
 
 	Assertions []Assertion `json:"assertions,omitempty"`
@@ -179,8 +185,8 @@ func WriteJSON(w io.Writer, r Report) error {
 	return encoder.Encode(r)
 }
 
-// Write renders the Report for a person: the header, then each Epoch with its four
-// Assertion lines, then the Verdict on a line of its own at the end.
+// Write renders the Report for a person: the header, then each Epoch with its Assertion
+// lines, then the Verdict on a line of its own at the end.
 func Write(w io.Writer, r Report) {
 	p := printer{w: w}
 	p.header(r)
@@ -226,6 +232,9 @@ func (p printer) header(r Report) {
 	p.field("distributor", "%s", r.Run.Distributor)
 	p.field("token", "%s", r.Run.Token)
 	p.field("dev wallet", "%s", r.Run.DevWallet)
+	if r.Run.Expected != "" {
+		p.field("expected", "%s", r.Run.Expected)
+	}
 
 	if r.Run.Tip != nil {
 		p.field("finality", "%s: block %d %s, endpoints within %d blocks of each other",
@@ -283,6 +292,9 @@ func (p printer) epoch(e Epoch) {
 		p.field("posted", "no Root: skipped by a later Root")
 	default:
 		p.field("posted", "no Root")
+	}
+	if e.Expected != "" {
+		p.field("expected", "root %s", e.Expected)
 	}
 
 	for _, a := range e.Assertions {

@@ -566,3 +566,170 @@ func TestRun_HeaderEchoesTheRate(t *testing.T) {
 		t.Errorf("stdout = %q", stdout)
 	}
 }
+
+// unposted is the scenario before the Root for 1000 goes up: the Epoch has closed at safe
+// finality and is funded, and the fake node holds no RootPosted for it at all.
+func unposted() *fakenode.Node {
+	node := scenario()
+	node.Tips["safe"] = 6007
+	node.DropLastLog() // the RootPosted for 1000
+	node.Ledgers[1000] = fakenode.Ledger{Funded: fakenode.Amounts(1000, 0, 500, 1, 0), Totals: fakenode.Amounts()}
+
+	return node
+}
+
+// Ticket 15: --expect judges a Root before it is posted. The Signer signs on exit
+// 0 before the Root is up, so the comparison has to live in this binary.
+func TestEpoch_ExpectJudgesARootBeforeItIsPosted(t *testing.T) {
+	other := chain.Hash{0xab}.String()
+
+	code, stdout, _ := cli(t, testDeployment, []*fakenode.Node{unposted()}, "epoch", "1000", "--expect", caseRoot.String())
+	if code != 0 {
+		t.Fatalf("the Case's Root: exit %d, want 0\n%s", code, stdout)
+	}
+	for _, want := range []string{
+		"\n  expected     " + caseRoot.String() + "\n", // the header echoes it
+		"\n  posted       no Root\n  expected     root " + caseRoot.String() + "\n",
+		"\n  root     ok    " + caseRoot.String() + ", as expected",
+		"\n  cap      ok    totals <= funded [1000 0 500 1 0] + carryIn [500 0 0 0 7]",
+		"\n  expected n/a   no Root posted",
+		"\nMATCH\n",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout lacks %q", want)
+		}
+	}
+
+	code, stdout, _ = cli(t, testDeployment, []*fakenode.Node{unposted()}, "epoch", "1000", "--expect", other)
+	if code != 1 {
+		t.Fatalf("another Root: exit %d, want 1\n%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "\n  root     FAIL  recomputed "+caseRoot.String()+", expected "+other) || !strings.Contains(stdout, "\nMISMATCH\n") {
+		t.Errorf("stdout = %q", stdout)
+	}
+}
+
+func TestEpoch_ExpectAgainstAPostedRootIsAFifthLine(t *testing.T) {
+	code, stdout, _ := cli(t, testDeployment, []*fakenode.Node{scenario()}, "epoch", "1000", "--expect", caseRoot.String())
+	if code != 0 {
+		t.Fatalf("the posted Root: exit %d, want 0\n%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "\n  expected ok    equals the posted Root\n") || strings.Count(stdout, "\n  ") < 5 {
+		t.Errorf("stdout = %q", stdout)
+	}
+
+	other := chain.Hash{0xab}.String()
+	code, stdout, _ = cli(t, testDeployment, []*fakenode.Node{scenario()}, "epoch", "1000", "--expect", other)
+	if code != 1 {
+		t.Fatalf("another Root: exit %d, want 1\n%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "\n  root     ok    ") || !strings.Contains(stdout, "\n  expected FAIL  expected "+other+", posted "+caseRoot.String()) {
+		t.Errorf("the four lines stand and the fifth names the difference; stdout = %q", stdout)
+	}
+}
+
+func TestEpoch_ExpectOnAnOpenEpochStaysIndeterminate(t *testing.T) {
+	// Epoch 1000 has not closed at finalized. An Expectation changes nothing: nothing was
+	// recomputed, so nothing can be MATCH — and not MISMATCH either.
+	for _, root := range []string{caseRoot.String(), chain.Hash{0xab}.String()} {
+		code, stdout, _ := cli(t, testDeployment, []*fakenode.Node{scenario()}, "epoch", "1000", "--finality", "finalized", "--expect", root)
+		if code != 2 || !strings.Contains(stdout, "\nINDETERMINATE: ") {
+			t.Errorf("--expect %s: exit %d, want 2\n%s", root, code, stdout)
+		}
+	}
+}
+
+func TestEpoch_ExpectWithChainIsForTheTargetOnly(t *testing.T) {
+	// The Expectation is for the Epoch asked about; the links --chain walks on the way are
+	// compared with the chain alone, on four lines.
+	node := scenario()
+	node.Tips["safe"] = 6019
+	root1001 := chain.Hash{0x10, 0x01}
+	node.RootPosted(6014, distributor, 1001, root1001, fakenode.Amounts(4, 0, 0, 0, 0), fakenode.Amounts(0, 0, 0, 1, 1))
+	node.Ledgers[1001] = fakenode.Ledger{Root: root1001, RootPostedAt: 6014 * 600, Funded: fakenode.Amounts(4, 0, 0, 0, 0), Totals: fakenode.Amounts(4, 0, 0, 0, 0)}
+
+	_, stdout, _ := cli(t, testDeployment, []*fakenode.Node{node}, "epoch", "1001", "--chain", "--expect", root1001.String())
+
+	if n := strings.Count(stdout, "\n  expected     root "); n != 1 {
+		t.Errorf("%d Epochs show the Expectation, want 1 (the target)\n%s", n, stdout)
+	}
+	if n := strings.Count(stdout, "\n  root     "); n != 2 {
+		t.Errorf("%d root lines, want one per rooted Epoch", n)
+	}
+	if !strings.Contains(stdout, "\n  expected ok    equals the posted Root\n") {
+		t.Errorf("stdout = %q", stdout)
+	}
+}
+
+// The fields the warm Signer reads (nutz-platform internal/warmsigner/signer.go) are the
+// interface a pinned release promises: verdict, reason, run.chainId, run.distributor,
+// epochs[].id and epochs[].recomputed.{hasRoot,root,totals,carryIn}. This decodes the
+// --expect report into exactly that shape.
+func TestRun_JSONKeepsTheFieldsTheSignerReads(t *testing.T) {
+	code, stdout, _ := cli(t, testDeployment, []*fakenode.Node{unposted()}, "epoch", "1000", "--expect", caseRoot.String(), "--json")
+	if code != 0 {
+		t.Fatalf("exit %d, want 0\n%s", code, stdout)
+	}
+
+	var rep struct {
+		Verdict string `json:"verdict"`
+		Reason  string `json:"reason"`
+		Run     struct {
+			ChainID     uint64 `json:"chainId"`
+			Distributor string `json:"distributor"`
+			Expected    string `json:"expected"`
+		} `json:"run"`
+		Epochs []struct {
+			ID         uint64 `json:"id"`
+			Expected   string `json:"expected"`
+			Recomputed struct {
+				HasRoot bool     `json:"hasRoot"`
+				Root    string   `json:"root"`
+				Totals  []string `json:"totals"`
+				CarryIn []string `json:"carryIn"`
+			} `json:"recomputed"`
+		} `json:"epochs"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &rep); err != nil {
+		t.Fatal(err)
+	}
+	if rep.Verdict != "MATCH" || rep.Reason != "" || rep.Run.ChainID != 4663 || rep.Run.Distributor != distributor.String() {
+		t.Errorf("top level = %+v", rep)
+	}
+	if len(rep.Epochs) != 1 {
+		t.Fatalf("epochs = %+v", rep.Epochs)
+	}
+	e := rep.Epochs[0]
+	if e.ID != 1000 || !e.Recomputed.HasRoot || e.Recomputed.Root != caseRoot.String() {
+		t.Errorf("epoch = %+v", e)
+	}
+	if got := strings.Join(e.Recomputed.Totals, " "); got != "1500 0 500 0 6" {
+		t.Errorf("totals = %q", got)
+	}
+	if got := strings.Join(e.Recomputed.CarryIn, " "); got != "500 0 0 0 7" {
+		t.Errorf("carryIn = %q (the expected Carry, since none is posted)", got)
+	}
+	if rep.Run.Expected != caseRoot.String() || e.Expected != caseRoot.String() {
+		t.Errorf("expected is echoed in the header (%q) and beside the Epoch (%q)", rep.Run.Expected, e.Expected)
+	}
+}
+
+func TestRun_ExpectUsageErrors(t *testing.T) {
+	t.Parallel()
+
+	root := chain.Hash{0xab}.String()
+	for _, args := range [][]string{
+		{"epoch", "1", "--rpc", "http://x", "--expect", "0x12"},
+		{"epoch", "1", "--rpc", "http://x", "--expect", chain.Hash{}.String()},
+		{"latest", "--rpc", "http://x", "--expect", root},
+		{"sync", "--rpc", "http://x", "--expect", root},
+	} {
+		var stderr bytes.Buffer
+		if code := run(context.Background(), args, io.Discard, &stderr, testDeployment); code != 2 {
+			t.Errorf("%v: exit %d, want 2", args, code)
+		}
+		if !strings.Contains(stderr.String(), "usage:") || !strings.Contains(stderr.String(), "--expect") {
+			t.Errorf("%v: stderr = %q", args, stderr.String())
+		}
+	}
+}

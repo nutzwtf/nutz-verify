@@ -83,8 +83,10 @@ func digitsOf(s string) (string, error) {
 	return s[2:], nil
 }
 
-// parseHash reads a 32-byte value: a block hash, a Root or a topic.
-func parseHash(s string) (Hash, error) {
+// ParseHash reads a 32-byte value: a block hash, a Root or a topic. Like ParseAddress it
+// accepts either case: the callers are the chain's own wire values and one flag, --expect,
+// whose value is echoed back in the report.
+func ParseHash(s string) (Hash, error) {
 	var h Hash
 
 	raw, err := parseHexBytes(s)

@@ -27,6 +27,9 @@ flags:
   --fresh              discard the Cache and rebuild it
   --chain              assert the full Carry chain back to deploy, not just the previous Epoch
   --artifacts <dir>    a published epochs/<id>/ bundle to diff against the Recompute; never an input
+  --expect <root>      a Root you expect for the Epoch: with none posted it is what the root line compares
+                       against, so a Root can be judged before it is posted; with one posted, a fifth
+                       line says whether they are equal
   --json               machine-readable output (schema ` + report.SchemaVersion + `)
 
 exit status: 0 MATCH, 1 MISMATCH, 2 INDETERMINATE (could not check; never 0)
@@ -40,6 +43,7 @@ type options struct {
 	fresh     bool
 	chain     bool
 	artifacts string
+	expect    *chain.Hash // the Expectation, or nil
 	json      bool
 }
 
@@ -73,6 +77,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, dep epoch
 			Endpoints:      []string{}, // never null in the JSON, even when the run stops before a Reader exists
 			CallsPerSecond: cmd.rate,
 		},
+	}
+	if cmd.expect != nil {
+		rep.Run.Expected = cmd.expect.String()
 	}
 
 	if err := v.execute(ctx, cmd, &rep); err != nil {
@@ -113,6 +120,18 @@ func parse(args []string) (command, error) {
 	fs.BoolVar(&cmd.fresh, "fresh", false, "")
 	fs.BoolVar(&cmd.chain, "chain", false, "")
 	fs.StringVar(&cmd.artifacts, "artifacts", "", "")
+	fs.Func("expect", "", func(s string) error {
+		h, err := chain.ParseHash(s)
+		if err != nil {
+			return fmt.Errorf("--expect %q %v", s, err)
+		}
+		if h == (chain.Hash{}) {
+			return errors.New("--expect: the zero hash is not a Root")
+		}
+		cmd.expect = &h
+
+		return nil
+	})
 	fs.BoolVar(&cmd.json, "json", false, "")
 	fs.Func("rpc", "", func(url string) error {
 		cmd.rpc = append(cmd.rpc, url)
@@ -157,6 +176,11 @@ func parse(args []string) (command, error) {
 		}
 		if cmd.name == "sync" && (cmd.chain || cmd.artifacts != "") {
 			return cmd, errors.New("sync recomputes nothing; --chain and --artifacts belong to epoch and latest")
+		}
+		// An Expectation is for an Epoch named by id: latest resolves to a Root the chain
+		// already holds, and sync recomputes nothing.
+		if cmd.expect != nil {
+			return cmd, fmt.Errorf("--expect is a Root for one Epoch; it belongs to epoch, not %s", cmd.name)
 		}
 	default:
 		return cmd, fmt.Errorf("unknown command %q", cmd.name)

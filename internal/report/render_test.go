@@ -30,7 +30,7 @@ func hexAddr(b byte) string {
 // line the renderers know how to draw.
 func sample() report.Report {
 	recompute, posted := agreeing()
-	assessed := report.Assess(recompute, posted)
+	assessed := report.Assess(recompute, posted, nil)
 
 	return report.Report{
 		Schema:  report.SchemaVersion,
@@ -86,6 +86,27 @@ func sample() report.Report {
 	}
 }
 
+// withExpectation is --expect over an Epoch with no Root posted yet: the header echoes
+// the Expectation, the Epoch shows it beside "posted  no Root", and there are five lines.
+func withExpectation() report.Report {
+	recompute, posted := agreeing()
+	posted = report.Posted{Funded: posted.Funded}
+	assessed := report.Assess(recompute, posted, &rootA)
+
+	r := sample()
+	r.Artifacts = nil
+	r.Run.Expected = rootA.String()
+	r.Verdict = assessed.Verdict
+	e := &r.Epochs[0]
+	e.Posted = nil
+	e.Expected = rootA.String()
+	e.Recomputed.CarryIn = report.Decimals(recompute.ExpectedCarryIn)
+	e.Assertions = assessed.Assertions
+	e.Verdict = assessed.Verdict
+
+	return r
+}
+
 func indeterminate() report.Report {
 	r := sample()
 	r.Epochs = nil
@@ -122,6 +143,7 @@ func TestWrite_Golden(t *testing.T) {
 	for name, r := range map[string]report.Report{
 		"epoch-match.txt":         sample(),
 		"epoch-indeterminate.txt": indeterminate(),
+		"epoch-expected.txt":      withExpectation(),
 	} {
 		var buf bytes.Buffer
 		report.Write(&buf, r)
@@ -135,6 +157,7 @@ func TestWriteJSON_Golden(t *testing.T) {
 	for name, r := range map[string]report.Report{
 		"epoch-match.json":         sample(),
 		"epoch-indeterminate.json": indeterminate(),
+		"epoch-expected.json":      withExpectation(),
 	} {
 		var buf bytes.Buffer
 		if err := report.WriteJSON(&buf, r); err != nil {

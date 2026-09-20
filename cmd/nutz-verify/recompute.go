@@ -3,13 +3,15 @@ package main
 import (
 	"context"
 
+	"github.com/nutzwtf/nutz-verify/chain"
 	"github.com/nutzwtf/nutz-verify/epoch"
 	"github.com/nutzwtf/nutz-verify/internal/report"
 )
 
 // epoch is one Recompute: the Engine rebuilds the Epoch — every rooted one from deploy
-// with --chain — and each Result is compared with what the chain holds. With --artifacts a
-// published bundle is diffed against the target's Result afterwards.
+// with --chain — and each Result is compared with what the chain holds, the target's also
+// with the Expectation if one was given. With --artifacts a published bundle is diffed
+// against the target's Result afterwards.
 //
 // Nothing here computes: every number in the report is read off a Result (ADR-0006), so
 // the binary the Signer runs and the library the indexer links agree by construction.
@@ -32,8 +34,12 @@ func (v *verifier) epoch(ctx context.Context, id uint64, rep *report.Report) err
 	}
 
 	verdicts := make([]report.Verdict, 0, len(results))
-	for _, r := range results {
-		assessed := assess(r)
+	for i, r := range results {
+		var expected *chain.Hash
+		if i == len(results)-1 {
+			expected = v.opts.expect // the Expectation is for the Epoch asked about, not the links --chain walks
+		}
+		assessed := assess(r, expected)
 		rep.Epochs = append(rep.Epochs, assessed)
 		verdicts = append(verdicts, assessed.Verdict)
 	}
@@ -83,9 +89,10 @@ func (v *verifier) reportCache(rep *report.Report) {
 	rep.Run.Cache = status
 }
 
-// assess compares one Result with what the chain holds and lays both out for the report.
-// It reads the Result and recomputes nothing of its own.
-func assess(r epoch.Result) report.Epoch {
+// assess compares one Result with what the chain holds — and with an Expectation, when
+// there is one — and lays it all out for the report. It reads the Result and recomputes
+// nothing of its own.
+func assess(r epoch.Result, expected *chain.Hash) report.Epoch {
 	recompute := report.Recompute{
 		HasRoot:         r.HasRoot,
 		Root:            r.Root,
@@ -100,7 +107,7 @@ func assess(r epoch.Result) report.Epoch {
 		chainSide.Totals, chainSide.CarryIn = r.Posted.Totals, r.Posted.CarryIn
 	}
 
-	assessed := report.Assess(recompute, chainSide)
+	assessed := report.Assess(recompute, chainSide, expected)
 
 	out := report.Epoch{
 		ID:      r.EpochID,
@@ -117,6 +124,9 @@ func assess(r epoch.Result) report.Epoch {
 		Assertions: assessed.Assertions,
 		Verdict:    assessed.Verdict,
 		Reason:     assessed.Reason,
+	}
+	if expected != nil {
+		out.Expected = expected.String()
 	}
 	if r.HasRoot {
 		out.Recomputed.Root = r.Root.String()

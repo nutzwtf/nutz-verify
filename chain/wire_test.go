@@ -113,7 +113,7 @@ func TestWireLog_Decode(t *testing.T) {
 func TestParseHash_RefusesNonHex(t *testing.T) {
 	t.Parallel()
 
-	if _, err := parseHash("0x" + strings.Repeat("zz", 32)); err == nil {
+	if _, err := ParseHash("0x" + strings.Repeat("zz", 32)); err == nil {
 		t.Error("parseHash = nil error, want a refusal")
 	}
 }

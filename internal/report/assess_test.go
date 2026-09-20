@@ -55,7 +55,8 @@ func statuses(assertions []report.Assertion) string {
 func TestAssess_AgreementIsMatchOnFourLines(t *testing.T) {
 	t.Parallel()
 
-	got := report.Assess(agreeing())
+	recompute, posted := agreeing()
+	got := report.Assess(recompute, posted, nil)
 
 	if got.Verdict != report.Match {
 		t.Fatalf("verdict = %s (%s), want MATCH", got.Verdict, got.Reason)
@@ -120,7 +121,7 @@ func TestAssess_ABrokenInvariantNamesItsOwnLine(t *testing.T) {
 			recompute, posted := agreeing()
 			tt.breaks(&recompute, &posted)
 
-			got := report.Assess(recompute, posted)
+			got := report.Assess(recompute, posted, nil)
 			if got.Verdict != report.Mismatch {
 				t.Fatalf("verdict = %s, want MISMATCH", got.Verdict)
 			}
@@ -149,7 +150,7 @@ func TestAssess_NoRootPostedYetIsIndeterminate(t *testing.T) {
 	recompute, _ := agreeing()
 	recompute.Holders = 2
 
-	got := report.Assess(recompute, report.Posted{})
+	got := report.Assess(recompute, report.Posted{}, nil)
 	if got.Verdict != report.Indeterminate {
 		t.Fatalf("verdict = %s, want INDETERMINATE", got.Verdict)
 	}
@@ -163,7 +164,7 @@ func TestAssess_AFundedEpochWithNoRootAndNoHoldersIsMatch(t *testing.T) {
 
 	// Spec §5: W == 0 is a legitimate no-Root state. The chain has nothing, the Recompute
 	// has nothing, and they agree — exit 0, never INDETERMINATE.
-	got := report.Assess(report.Recompute{}, report.Posted{Funded: amounts(1000, 0, 0, 0, 0)})
+	got := report.Assess(report.Recompute{}, report.Posted{Funded: amounts(1000, 0, 0, 0, 0)}, nil)
 	if got.Verdict != report.Match {
 		t.Fatalf("verdict = %s, want MATCH", got.Verdict)
 	}
@@ -178,7 +179,7 @@ func TestAssess_ASkippedEpoch(t *testing.T) {
 	// Skipped is the contract's word for "a later Root passed this Epoch over and its
 	// funding rolled into Carry". Right when the Recompute finds no Holders either; a
 	// MISMATCH when the Recompute has a tree the indexer never posted.
-	got := report.Assess(report.Recompute{}, report.Posted{Skipped: true})
+	got := report.Assess(report.Recompute{}, report.Posted{Skipped: true}, nil)
 	if got.Verdict != report.Match {
 		t.Fatalf("no Holders: verdict = %s, want MATCH", got.Verdict)
 	}
@@ -187,7 +188,7 @@ func TestAssess_ASkippedEpoch(t *testing.T) {
 	}
 
 	recompute, _ := agreeing()
-	got = report.Assess(recompute, report.Posted{Skipped: true})
+	got = report.Assess(recompute, report.Posted{Skipped: true}, nil)
 	if got.Verdict != report.Mismatch {
 		t.Fatalf("with a tree: verdict = %s, want MISMATCH", got.Verdict)
 	}
@@ -221,5 +222,112 @@ func TestWorst_IndeterminateOutranksMismatch(t *testing.T) {
 	}
 	if got := report.Worst(); got != report.Match {
 		t.Errorf("Worst of nothing = %s, want MATCH", got)
+	}
+}
+
+// Ticket 15: an Expectation, judged before the Root is posted.
+func TestAssess_AnExpectationStandsInForTheRootNotYetPosted(t *testing.T) {
+	t.Parallel()
+
+	// The chain holds no Root; the Recompute has one. Without an Expectation that is
+	// INDETERMINATE. With one, it is the root line's comparand, and MATCH says
+	// "my Recompute is the Root you expect, and it fits the cap".
+	recompute, _ := agreeing()
+	recompute.Holders = 2
+	chainSide := report.Posted{Funded: amounts(1000, 0, 500, 1, 0)}
+
+	got := report.Assess(recompute, chainSide, &rootA)
+	if got.Verdict != report.Match {
+		t.Fatalf("verdict = %s (%s), want MATCH", got.Verdict, got.Reason)
+	}
+	if got, want := statuses(got.Assertions), "root:pass totals:pass cap:pass carryIn:pass expected:n/a"; got != want {
+		t.Errorf("assertions = %q, want %q", got, want)
+	}
+	if d := got.Assertions[2].Detail; !strings.Contains(d, "funded [1000 0 500 1 0] + carryIn [500 0 0 0 7]") {
+		t.Errorf("the cap is asserted against funded plus the expected carryIn; detail = %q", d)
+	}
+	if d := got.Assertions[3].Detail; !strings.Contains(d, "carryOut of epoch 999") {
+		t.Errorf("carryIn names its provenance; detail = %q", d)
+	}
+
+	other := rootA
+	other[0] ^= 0xff
+	got = report.Assess(recompute, chainSide, &other)
+	if got.Verdict != report.Mismatch {
+		t.Fatalf("another Expectation: verdict = %s, want MISMATCH", got.Verdict)
+	}
+	if got, want := statuses(got.Assertions), "root:fail totals:pass cap:pass carryIn:pass expected:n/a"; got != want {
+		t.Errorf("assertions = %q, want %q", got, want)
+	}
+	if d := got.Assertions[0].Detail; !strings.Contains(d, "recomputed "+rootA.String()) || !strings.Contains(d, "expected "+other.String()) {
+		t.Errorf("root detail = %q", d)
+	}
+}
+
+func TestAssess_AnExpectationThatBreaksTheCapIsMismatch(t *testing.T) {
+	t.Parallel()
+
+	// The Recompute agrees with the Expectation but allocates more than the Distributor
+	// holds for the Epoch: the cap line fails, as it would against a posted Root.
+	recompute, _ := agreeing()
+	got := report.Assess(recompute, report.Posted{Funded: amounts(100, 0, 500, 1, 0)}, &rootA)
+	if got.Verdict != report.Mismatch {
+		t.Fatalf("verdict = %s, want MISMATCH", got.Verdict)
+	}
+	if got, want := statuses(got.Assertions), "root:pass totals:pass cap:fail carryIn:pass expected:n/a"; got != want {
+		t.Errorf("assertions = %q, want %q", got, want)
+	}
+}
+
+func TestAssess_AnExpectationWhenTheRecomputeHasNoRootIsMismatch(t *testing.T) {
+	t.Parallel()
+
+	got := report.Assess(report.Recompute{}, report.Posted{Funded: amounts(1000, 0, 0, 0, 0)}, &rootA)
+	if got.Verdict != report.Mismatch {
+		t.Fatalf("verdict = %s, want MISMATCH", got.Verdict)
+	}
+	if got, want := statuses(got.Assertions), "root:fail totals:pass cap:n/a carryIn:n/a expected:n/a"; got != want {
+		t.Errorf("assertions = %q, want %q", got, want)
+	}
+	if d := got.Assertions[0].Detail; !strings.Contains(d, "no eligible Holders") {
+		t.Errorf("root detail = %q", d)
+	}
+}
+
+func TestAssess_AnExpectationAgainstAPostedRootIsAFifthLine(t *testing.T) {
+	t.Parallel()
+
+	// A Root is up: the four lines are as they were, and the fifth says whether the
+	// Expectation is the posted Root.
+	recompute, posted := agreeing()
+
+	got := report.Assess(recompute, posted, &rootA)
+	if got.Verdict != report.Match {
+		t.Fatalf("verdict = %s, want MATCH", got.Verdict)
+	}
+	if got, want := statuses(got.Assertions), "root:pass totals:pass cap:pass carryIn:pass expected:pass"; got != want {
+		t.Errorf("assertions = %q, want %q", got, want)
+	}
+
+	other := rootA
+	other[31] ^= 0xff
+	got = report.Assess(recompute, posted, &other)
+	if got.Verdict != report.Mismatch {
+		t.Fatalf("another Expectation: verdict = %s, want MISMATCH", got.Verdict)
+	}
+	if got, want := statuses(got.Assertions), "root:pass totals:pass cap:pass carryIn:pass expected:fail"; got != want {
+		t.Errorf("assertions = %q, want %q", got, want)
+	}
+	if d := got.Assertions[4].Detail; !strings.Contains(d, "expected "+other.String()) || !strings.Contains(d, "posted "+rootA.String()) {
+		t.Errorf("expected detail = %q", d)
+	}
+
+	// Skipped: nothing can be posted for the Epoch any more, so any Expectation is wrong.
+	got = report.Assess(report.Recompute{}, report.Posted{Skipped: true}, &rootA)
+	if got.Verdict != report.Mismatch {
+		t.Fatalf("skipped: verdict = %s, want MISMATCH", got.Verdict)
+	}
+	if got, want := statuses(got.Assertions), "root:pass totals:pass cap:n/a carryIn:n/a expected:fail"; got != want {
+		t.Errorf("assertions = %q, want %q", got, want)
 	}
 }

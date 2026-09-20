@@ -75,12 +75,19 @@ const (
 	NotApplicable Status = "n/a"
 )
 
-// The four Assertions of ADR-0002, by name and in the order they are reported.
+// The four Assertions of ADR-0002, by name and in the order they are reported, and the
+// fifth that --expect adds (ticket 15).
 const (
 	AssertRoot    = "root"
 	AssertTotals  = "totals"
 	AssertCap     = "cap"
 	AssertCarryIn = "carryIn"
+
+	// AssertExpected is reported only when there is an Expectation: whether it equals
+	// the posted Root. With no Root posted the Expectation is the Root Assertion's
+	// comparand instead, and this line is NotApplicable, so a run with --expect always
+	// has five lines.
+	AssertExpected = "expected"
 )
 
 // Assertion is one of the four things MATCH commits to, with what was compared. Name is
@@ -135,17 +142,37 @@ type Assessment struct {
 	Reason     string
 }
 
-// Assess compares a Recompute with what the chain posted.
+// Assess compares a Recompute with what the chain posted, and — when expected is not nil —
+// with an Expectation: a Root someone expects for the Epoch (--expect, ticket 15).
 //
-// The Assertions are always four and always in ADR-0002's order. An Assertion with nothing
-// to compare is NotApplicable rather than dropped, so the reader never has to wonder
-// whether a missing line was a pass.
-func Assess(recompute Recompute, posted Posted) Assessment {
+// The Assertions are always four and always in ADR-0002's order, five with an Expectation. An
+// Assertion with nothing to compare is NotApplicable rather than dropped, so the reader
+// never has to wonder whether a missing line was a pass.
+//
+// An Expectation changes one thing: an Epoch with no Root posted is no longer INDETERMINATE.
+// The warm Signer of engineering spec §3.2 signs a Root before it is posted, and the
+// comparison it needs — "is this the Root I recompute?" — has to happen inside this binary
+// and not in a wrapper, or the checksum pin guards the wrong code. With a Root posted the
+// Expectation is checked against it as a fifth line, and the four lines are as they were.
+func Assess(recompute Recompute, posted Posted, expected *chain.Hash) Assessment {
 	switch {
 	case posted.HasRoot:
-		return assessPosted(recompute, posted)
+		assessed := assessPosted(recompute, posted)
+		if expected != nil {
+			assessed = withExpected(assessed, assertExpected(*expected, posted.Root))
+		}
+
+		return assessed
 	case posted.Skipped:
-		return assessSkipped(recompute)
+		assessed := assessSkipped(recompute)
+		if expected != nil {
+			assessed = withExpected(assessed, Assertion{Name: AssertExpected, Status: Fail, Detail: fmt.Sprintf(
+				"expected %s, but the Epoch was skipped by a later Root: nothing can be posted for it", expected)})
+		}
+
+		return assessed
+	case expected != nil:
+		return assessExpected(recompute, posted, *expected)
 	case recompute.HasRoot:
 		// The Root is simply not up yet: the Epoch closed, the Verifier has a tree, and the
 		// Distributor has nothing to compare it to. That is not MISMATCH — nothing has been
@@ -175,6 +202,58 @@ func assessPosted(recompute Recompute, posted Posted) Assessment {
 		assertCap(posted),
 		assertCarryIn(recompute, posted.CarryIn),
 	})
+}
+
+// assessExpected is an Expectation with no Root posted: it stands in for the posted Root. The Root line compares the Recompute with it. Totals has nothing posted to compare
+// with, so the line shows the Recompute's own, which is what a MATCH vouches for. The cap is
+// the Recompute's totals against the ledger's funded plus the carryIn the Recompute ran
+// with, which without a Root is the expected one; and carryIn is that expected value with
+// its provenance, since the chain holds no posted value yet. So MATCH reads: "my Recompute
+// is the Root you expect, and it fits the cap".
+func assessExpected(recompute Recompute, posted Posted, expected chain.Hash) Assessment {
+	if !recompute.HasRoot {
+		return fromAssertions([]Assertion{
+			{Name: AssertRoot, Status: Fail, Detail: fmt.Sprintf(
+				"expected %s, but the Recompute has no eligible Holders and so no Root", expected)},
+			{Name: AssertTotals, Status: Pass, Detail: "nothing allocated"},
+			{Name: AssertCap, Status: NotApplicable, Detail: "no totals recomputed"},
+			{Name: AssertCarryIn, Status: NotApplicable, Detail: "no Root posted; the funding stays as Carry for the next Root"},
+			expectedStoodIn(),
+		})
+	}
+
+	root := Assertion{Name: AssertRoot, Status: Pass, Detail: fmt.Sprintf("%s, as expected; no Root posted yet", expected)}
+	if recompute.Root != expected {
+		root = Assertion{Name: AssertRoot, Status: Fail, Detail: fmt.Sprintf("recomputed %s, expected %s", recompute.Root, expected)}
+	}
+
+	return fromAssertions([]Assertion{
+		root,
+		{Name: AssertTotals, Status: Pass, Detail: fmt.Sprintf("%s recomputed; nothing posted to compare with", formatAmounts(recompute.Totals))},
+		assertCapOver(recompute.Totals, posted.Funded, recompute.ExpectedCarryIn),
+		{Name: AssertCarryIn, Status: Pass, Detail: fmt.Sprintf(
+			"%s = %s; nothing posted to compare with", formatAmounts(recompute.ExpectedCarryIn), recompute.CarryFrom)},
+		expectedStoodIn(),
+	})
+}
+
+// expectedStoodIn is the fifth line when there was no posted Root for the Expectation to
+// be compared with: it was the Root line's comparand instead.
+func expectedStoodIn() Assertion {
+	return Assertion{Name: AssertExpected, Status: NotApplicable, Detail: "no Root posted: the expectation was the root line's comparand"}
+}
+
+// withExpected appends the fifth line and re-derives the Verdict.
+func withExpected(assessed Assessment, expected Assertion) Assessment {
+	return fromAssertions(append(assessed.Assertions, expected))
+}
+
+func assertExpected(expected, posted chain.Hash) Assertion {
+	if expected != posted {
+		return Assertion{Name: AssertExpected, Status: Fail, Detail: fmt.Sprintf("expected %s, posted %s", expected, posted)}
+	}
+
+	return Assertion{Name: AssertExpected, Status: Pass, Detail: "equals the posted Root"}
 }
 
 func assessSkipped(recompute Recompute) Assessment {
@@ -235,16 +314,22 @@ func assertTotals(recomputed, posted chain.Amounts) Assertion {
 // checking it again is cheap and means the Verifier's MATCH does not rest on the contract
 // having done so.
 func assertCap(posted Posted) Assertion {
-	for t := range posted.Totals {
-		available := new(big.Int).Add(posted.Funded[t], posted.CarryIn[t])
-		if posted.Totals[t].Cmp(available) > 0 {
+	return assertCapOver(posted.Totals, posted.Funded, posted.CarryIn)
+}
+
+// assertCapOver is the cap for whichever totals and carryIn are being asserted: the
+// posted ones when a Root stands, the Recompute's own under an Expectation.
+func assertCapOver(totals, funded, carryIn chain.Amounts) Assertion {
+	for t := range totals {
+		available := new(big.Int).Add(funded[t], carryIn[t])
+		if totals[t].Cmp(available) > 0 {
 			return Assertion{Name: AssertCap, Status: Fail, Detail: fmt.Sprintf(
-				"token %d: totals %s > funded %s + carryIn %s", t, posted.Totals[t], posted.Funded[t], posted.CarryIn[t])}
+				"token %d: totals %s > funded %s + carryIn %s", t, totals[t], funded[t], carryIn[t])}
 		}
 	}
 
 	return Assertion{Name: AssertCap, Status: Pass, Detail: fmt.Sprintf(
-		"totals <= funded %s + carryIn %s in every token", formatAmounts(posted.Funded), formatAmounts(posted.CarryIn))}
+		"totals <= funded %s + carryIn %s in every token", formatAmounts(funded), formatAmounts(carryIn))}
 }
 
 func assertCarryIn(recompute Recompute, posted chain.Amounts) Assertion {

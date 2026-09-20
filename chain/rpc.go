@@ -421,10 +421,10 @@ func (w wireBlock) decode() (Block, error) {
 	if b.Number, err = parseQuantity(w.Number); err != nil {
 		return b, fmt.Errorf("block number %w", err)
 	}
-	if b.Hash, err = parseHash(w.Hash); err != nil {
+	if b.Hash, err = ParseHash(w.Hash); err != nil {
 		return b, fmt.Errorf("block %d: hash %w", b.Number, err)
 	}
-	if b.ParentHash, err = parseHash(w.ParentHash); err != nil {
+	if b.ParentHash, err = ParseHash(w.ParentHash); err != nil {
 		return b, fmt.Errorf("block %d: parentHash %w", b.Number, err)
 	}
 
@@ -477,7 +477,7 @@ func (w wireLog) decode() (eventLog, error) {
 	if l.LogIndex, err = parseQuantity(w.LogIndex); err != nil {
 		return l, fmt.Errorf("log at block %d: logIndex %w", l.BlockNumber, err)
 	}
-	if l.BlockHash, err = parseHash(w.BlockHash); err != nil {
+	if l.BlockHash, err = ParseHash(w.BlockHash); err != nil {
 		return l, fmt.Errorf("log at block %d index %d: blockHash %w", l.BlockNumber, l.LogIndex, err)
 	}
 	if l.Address, err = ParseAddress(w.Address); err != nil {
@@ -489,7 +489,7 @@ func (w wireLog) decode() (eventLog, error) {
 
 	l.Topics = make([]Hash, 0, len(w.Topics))
 	for i, raw := range w.Topics {
-		topic, err := parseHash(raw)
+		topic, err := ParseHash(raw)
 		if err != nil {
 			return l, fmt.Errorf("log at block %d index %d: topic %d %w", l.BlockNumber, l.LogIndex, i, err)
 		}

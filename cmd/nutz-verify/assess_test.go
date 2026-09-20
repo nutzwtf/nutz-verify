@@ -38,7 +38,7 @@ func TestAssess_ReadsTheEngineResult(t *testing.T) {
 		t.Fatalf("Compute: %v", err)
 	}
 
-	got := assess(result)
+	got := assess(result, nil)
 
 	if got.Verdict != report.Match {
 		t.Fatalf("Verdict = %s (%s), want MATCH", got.Verdict, got.Reason)
