@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted, amended 2026-09-20 (ticket 15: an Expectation)
 date: 2026-09-14
 ---
 
@@ -15,6 +15,8 @@ Every input to a Recompute comes from RPC: NUTZ `Transfer` logs, block timestamp
 4. `carryIn[5]` equals what the previous Epoch should have left behind.
 
 The full Carry chain back to deploy sits behind `--chain`, because it needs history the 30-minute Dispute window does not afford.
+
+**Amended 2026-09-20 (ticket 15).** The warm Signer signs a Root *before* it is posted, and under the rule below "no Root posted yet" is INDETERMINATE: the Verdict it needs did not exist until after the signature it gates. `--expect <root>` gives the run an Expectation. With none on chain, the Expectation is the comparand of line 1, `totals` is the Recompute's own, the cap is checked over the ledger's `funded` plus the expected `carryIn`, and MATCH means "my Recompute is the Root you expect and it fits the cap". With a Root posted, the four lines stand and a fifth says whether the Expectation equals it. The alternative — the Signer comparing `recomputed.root` from the `--json` report in its own code — was rejected because that moves the comparison, the part an attacker would swap, out of the checksum-pinned public binary and into private code, which is what the pin exists to prevent. The Expectation is an input that came from neither the chain nor the build, so it is echoed in the header like the other two.
 
 ## Consequences
 

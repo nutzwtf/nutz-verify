@@ -57,7 +57,15 @@ MATCH
 |---|---|---|
 | `MATCH` | 0 | the recomputed Root, `totals`, the cap and `carryIn` all agree with the chain |
 | `MISMATCH` | 1 | at least one of the four does not; the line says which |
-| `INDETERMINATE` | 2 | nothing could be checked: RPC error, Epoch not closed at the requested finality, endpoints disagreeing, no Root posted yet, Cache unusable |
+| `INDETERMINATE` | 2 | nothing could be checked: RPC error, Epoch not closed at the requested finality, endpoints disagreeing, no Root posted yet (unless one was expected with `--expect`), Cache unusable |
+
+**Judging a Root before it is posted.** `--expect <root>` gives the run an Expectation, a Root for the Epoch. With
+none on chain, the Expectation is what the `root` line compares against, and MATCH means "my
+Recompute is the Root you expect, and it fits the cap": this is how the warm Signer signs on
+exit 0 before the Root it gates is up, with the comparison inside the pinned binary rather than
+in private code around it. With a Root already posted, the four lines are as they were and a
+fifth, `expected`, says whether the Expectation equals it. The Expectation is echoed in the header and
+beside `posted`: it is the one input a run has that came from neither the chain nor the build.
 
 **`2` is never `0`.** The warm Signer signs only on `0`; "could not check" is not "checked and
 fine" ([ADR-0002](docs/adr/0002-rpc-only-and-what-match-asserts.md)).
@@ -72,6 +80,7 @@ fine" ([ADR-0002](docs/adr/0002-rpc-only-and-what-match-asserts.md)).
 | `--fresh` | discard the Cache and rebuild it (the remedy for a Cache built for another history) |
 | `--chain` | assert the full Carry chain back to deploy, not just the previous Epoch. The history is replayed once however many Epochs that is; the cost is the `RootPosted` read from deploy and a Root per rooted Epoch |
 | `--artifacts <dir>` | a published `epochs/<id>/` bundle to diff against the Recompute; it can never influence one |
+| `--expect <root>` | an Expectation: a Root for the Epoch, judged before it is posted (above); `epoch` only |
 | `--json` | one JSON document, schema `nutz-verify-report/1`; the Signer's interface |
 
 The Cache lives at `${XDG_CACHE_HOME:-~/.cache}/nutz-verify/<chainId>-<token>/`. A cold Cache

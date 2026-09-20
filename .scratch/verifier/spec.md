@@ -113,13 +113,15 @@ OpenZeppelin `StandardMerkleTree` v1.0.8 semantics, normative per ADR-0003. Leaf
 
 ## 7. Verdicts and Assertions
 
-Four Assertions, reported as four lines: Root equality; `totals` equality; the cap `totals[i] <= funded[i] + carryIn[i]`; `carryIn` equality against what the previous Epoch should have left. The full Carry chain back to deploy is `--chain` only.
+Four Assertions, reported as four lines: Root equality; `totals` equality; the cap `totals[i] <= funded[i] + carryIn[i]`; `carryIn` equality against what the previous Epoch should have left. The full Carry chain back to deploy is `--chain` only. A run given an Expectation (`--expect <root>`, ticket 15) has a fifth line, `expected`: with a Root posted, whether the Expectation equals it; with none, the Expectation is the Root Assertion's comparand and the fifth line is n/a.
 
 Verdict is MATCH, MISMATCH or INDETERMINATE. Exit `0`, `1`, `2` respectively. **`2` is not `0`**: the Signer signs only on `0`, and conflating "could not check" with "checked and fine" degrades the 2-of-3 during exactly the RPC outage an attacker would pick.
 
 **What "what the previous Epoch should have left" means** (resolved in ticket 05). The expected `carryIn` of Epoch `e` is the `carryOut` of the **Recompute** of the previous rooted Epoch `p` — run with `p`'s own posted `carryIn`, so one link is asserted — plus the `funded` of every Epoch in `(p, e)`, all of which the contract Skipped and rolled into Carry. With no `p`, the walk starts at the Distributor's deploy Epoch with nothing. `--chain` walks from deploy with the *recomputed* Carry throughout and reports every rooted Epoch. Root and `totals` are always recomputed over the **posted** `carryIn`, so a wrong Carry fails Assertion 4 alone rather than all four.
 
 **No Root, three ways.** A funded Epoch with no Root and no eligible Holders is MATCH whether the Distributor has Skipped it yet or not (§5). Skipped with a Recompute that has a tree is MISMATCH. Not Skipped, no Root, and a Recompute with a tree is INDETERMINATE: "no Root posted yet".
+
+**Unless a Root is expected** (ticket 15). The warm Signer signs a Root before it is posted, so the Verdict it needs does not exist under the rule above. With `--expect <root>` and no Root on chain: the Root line compares the Recompute with the Expectation; `totals` is the Recompute's own; the cap is the Recompute's `totals` against the ledger's `funded` plus the expected `carryIn`; `carryIn` is the expected value with its provenance. MATCH means "my Recompute is the Root you expect and it fits the cap", exit 0. An Epoch not closed at the requested finality stays INDETERMINATE; a Skipped Epoch or a Recompute with no tree is MISMATCH against any Expectation. The comparison lives in this binary and not in a wrapper because the wrapper is exactly what the checksum pin cannot see.
 
 ## 8. CLI
 
@@ -129,7 +131,7 @@ nutz-verify latest         the most recent posted Root  (dispute-window default)
 nutz-verify sync           advance the Cache only
 ```
 
-Flags: `--rpc` (repeatable; disagreement is INDETERMINATE), `--finality latest|safe|finalized` (default `safe`), `--fresh`, `--chain`, `--artifacts`, `--json`. Every run's header echoes chain id, Distributor address, pinned `DEV_WALLET`, finality level and endpoints — the unverifiable inputs are shown, not buried. `--json` carries a versioned schema; it is the Signer's interface.
+Flags: `--rpc` (repeatable; disagreement is INDETERMINATE), `--finality latest|safe|finalized` (default `safe`), `--fresh`, `--chain`, `--artifacts`, `--expect <root>` (`epoch` only; with `--chain` it is for the target), `--json`. Every run's header echoes chain id, Distributor address, pinned `DEV_WALLET`, finality level, endpoints and the Expectation if one was given — the unverifiable inputs are shown, not buried. `--json` carries a versioned schema; it is the Signer's interface.
 
 ## 9. Cache
 

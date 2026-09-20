@@ -17,8 +17,12 @@ The outcome of a Recompute, always one of three: **MATCH**, **MISMATCH**, **INDE
 _Avoid_: pass/fail, ok, valid
 
 **Assertion**:
-One of the four things a MATCH commits to: Root equality, `totals` equality, the per-token cap, and `carryIn`. Reported as four lines, so a MISMATCH names which one broke.
+One of the four things a MATCH commits to: Root equality, `totals` equality, the per-token cap, and `carryIn`. Reported as four lines, so a MISMATCH names which one broke. A Recompute given an Expectation has a fifth: whether the Expectation equals the posted Root.
 _Avoid_: check, test (that is a Case)
+
+**Expectation**:
+A Root someone expects for an Epoch, given to a Recompute with `--expect`. With no Root posted it is what the Root Assertion compares against, so the Recompute can reach a Verdict before the Root is up; with one posted it is checked against it. Shown in the report, never an input to the Recompute itself.
+_Avoid_: proposal, hint, candidate, claim (a Claim is a Holder's, in `nutz-contracts`)
 
 **Cache**:
 The Verifier's own append-only record of NUTZ transfers and block timestamps, built from RPC and owned by whoever runs the binary. It is never shared, never published, and never an input anyone else supplies.
