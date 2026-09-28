@@ -222,6 +222,7 @@ func (v *verifier) execute(ctx context.Context, cmd command, rep *report.Report)
 		Endpoints:      v.opts.rpc,
 		Token:          v.dep.Token,
 		Distributor:    v.dep.Distributor,
+		PonsFactory:    v.dep.PonsFactory,
 		CallsPerSecond: v.opts.rate,
 	})
 	if err != nil {

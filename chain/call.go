@@ -1,6 +1,7 @@
 package chain
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -13,8 +14,9 @@ const selectorSize = 4
 // the signature rather than written as literals, and for the same reason: a selector built
 // from a drifted signature does not fail, it hits the fallback and returns empty data.
 var (
-	selectorLedger   = selectorOf("ledger(uint8,uint256)")
-	selectorExcluded = selectorOf("excluded()")
+	selectorLedger           = selectorOf("ledger(uint8,uint256)")
+	selectorExcluded         = selectorOf("excluded()")
+	selectorGetLaunchedToken = selectorOf("getLaunchedToken(address)")
 )
 
 func selectorOf(signature string) [selectorSize]byte {
@@ -75,6 +77,50 @@ func decodeLedger(data []byte) (Ledger, error) {
 	}
 
 	return ledger, nil
+}
+
+// encodeGetLaunchedToken is the Pons factory's getLaunchedToken(token) call.
+func encodeGetLaunchedToken(token Address) []byte {
+	out := make([]byte, selectorSize+wordSize)
+	copy(out, selectorGetLaunchedToken[:])
+	copy(out[selectorSize+wordSize-addressSize:], token[:])
+
+	return out
+}
+
+// launchedTokenWords is IPonsV2LaunchFactory.LaunchedToken: fifteen static fields, so the
+// struct returns as fifteen words in ABI order with no offsets. The Verifier reads two of
+// them: curve, the second, and exists, the last.
+const launchedTokenWords = 15
+
+// decodeLaunchedToken reads the factory's launch record for the Token and returns its
+// bonding curve. A record with exists == false, or one whose curve is the zero address, is an
+// error and never an empty answer: it means the pinned Token was not launched through this
+// factory, and an Engine that shrugged would count the curve's supply as a Holder's.
+func decodeLaunchedToken(data []byte) (Address, error) {
+	if len(data) != launchedTokenWords*wordSize {
+		return Address{}, fmt.Errorf("chain: getLaunchedToken(): returned %d bytes, and the LaunchedToken struct is %d",
+			len(data), launchedTokenWords*wordSize)
+	}
+
+	exists, err := wordBool(dataWord(data, launchedTokenWords-1))
+	if err != nil {
+		return Address{}, fmt.Errorf("chain: getLaunchedToken(): exists %w", err)
+	}
+	if !exists {
+		return Address{}, errors.New("chain: getLaunchedToken(): the factory has no launch record for the Token; " +
+			"it was not launched through this Pons factory")
+	}
+
+	curve, err := wordAddress(dataWord(data, 1))
+	if err != nil {
+		return Address{}, fmt.Errorf("chain: getLaunchedToken(): curve %w", err)
+	}
+	if curve == (Address{}) {
+		return Address{}, errors.New("chain: getLaunchedToken(): the launch record names no curve")
+	}
+
+	return curve, nil
 }
 
 // decodeAddressArray reads abi.encode(address[]) — the one dynamic shape the Verifier

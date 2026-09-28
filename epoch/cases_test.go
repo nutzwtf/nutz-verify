@@ -33,6 +33,11 @@ const caseDir = "../testdata/cases"
 var (
 	caseToken       = repeatAddr(0xf1)
 	caseDistributor = repeatAddr(0xf2)
+	caseFactory     = repeatAddr(0xf3)
+
+	// caseCurve is the bonding curve the fake factory reports for a Case that names none
+	// (ADR-0007): an address that holds nothing, so excluding it changes no number.
+	caseCurve = repeatAddr(0xf4)
 
 	// caseDevWallet stands in for the zero address, which a Case uses to mean "no dev
 	// wallet" and which Deployment refuses. An address that holds nothing is the same
@@ -155,6 +160,12 @@ func chainOf(t *testing.T, c testCase) (*fakenode.Node, epoch.Deployment, uint64
 		node.Exclusion(blockOf(e.Timestamp), caseDistributor, parseAddress(t, e.Account))
 	}
 
+	curve := caseCurve
+	if c.Curve != "" {
+		curve = parseAddress(t, c.Curve)
+	}
+	node.Launch(caseFactory, caseToken, curve)
+
 	root := chain.Hash{0x01} // any: the Engine reads it and compares nothing
 	funded, carryIn := parseVector(t, "funded", c.Funded), parseVector(t, "carryIn", c.CarryIn)
 	node.RootPosted(tip, caseDistributor, c.EpochID, root, fakenode.Amounts(), carryIn)
@@ -165,6 +176,7 @@ func chainOf(t *testing.T, c testCase) (*fakenode.Node, epoch.Deployment, uint64
 		Token:            caseToken,
 		Distributor:      caseDistributor,
 		DevWallet:        parseAddress(t, c.DevWallet),
+		PonsFactory:      caseFactory,
 		TokenBlock:       0,
 		DistributorBlock: 0,
 	}
@@ -172,7 +184,7 @@ func chainOf(t *testing.T, c testCase) (*fakenode.Node, epoch.Deployment, uint64
 		dep.DevWallet = caseDevWallet
 	}
 
-	for _, reserved := range []chain.Address{caseToken, caseDistributor, caseDevWallet} {
+	for _, reserved := range []chain.Address{caseToken, caseDistributor, caseDevWallet, caseFactory, caseCurve} {
 		if bytes.Contains(c.raw, []byte(reserved.String())) {
 			t.Fatalf("Case mentions %s, which this harness uses for a contract", reserved)
 		}
@@ -189,6 +201,7 @@ func newEngine(t *testing.T, node *fakenode.Node, dep epoch.Deployment) *epoch.E
 		Endpoints:      []string{node.Serve(t)},
 		Token:          dep.Token,
 		Distributor:    dep.Distributor,
+		PonsFactory:    dep.PonsFactory,
 		CallsPerSecond: 1_000_000, // a fake node has no budget to respect
 	})
 	if err != nil {
@@ -217,6 +230,7 @@ type testCase struct {
 	DevWallet  string          `json:"devWallet"`
 	Transfers  []caseTransfer  `json:"transfers"`
 	ExcludedAt []caseExclusion `json:"excludedAt"`
+	Curve      string          `json:"curve"`
 	Funded     []string        `json:"funded"`
 	CarryIn    []string        `json:"carryIn"`
 	Expected   caseExpectation `json:"expected"`

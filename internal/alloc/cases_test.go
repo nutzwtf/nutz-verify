@@ -136,9 +136,15 @@ type testCase struct {
 	DevWallet  string          `json:"devWallet"`
 	Transfers  []caseTransfer  `json:"transfers"`
 	ExcludedAt []caseExclusion `json:"excludedAt"`
-	Funded     []string        `json:"funded"`
-	CarryIn    []string        `json:"carryIn"`
-	Expected   caseExpectation `json:"expected"`
+
+	// Curve is the Token's Pons bonding curve, Excluded in every Epoch (ADR-0007). The
+	// Engine reads it from the factory; this hermetic runner applies the rule as the Engine
+	// does, an exclusion at timestamp 0. Empty when the Case has no curve.
+	Curve string `json:"curve"`
+
+	Funded   []string        `json:"funded"`
+	CarryIn  []string        `json:"carryIn"`
+	Expected caseExpectation `json:"expected"`
 }
 
 type caseTransfer struct {
@@ -202,6 +208,9 @@ func (c testCase) params(t *testing.T) alloc.Params {
 			Timestamp: e.Timestamp,
 			Account:   parseAddress(t, e.Account),
 		})
+	}
+	if c.Curve != "" {
+		params.Exclusions = append(params.Exclusions, twab.Exclusion{Timestamp: 0, Account: parseAddress(t, c.Curve)})
 	}
 
 	return params

@@ -15,7 +15,9 @@ import (
 	"time"
 )
 
-// The anvil harness: a real node, the real NutzDistributor, and a stand-in ERC-20 for NUTZ.
+// The anvil harness: a real node, the real NutzDistributor, a stand-in ERC-20 for NUTZ, and
+// nutz-contracts' MockPonsFactory standing in for the Pons factory, since the stand-in was
+// never launched through the real one (ADR-0007).
 //
 // ADR-0004 lets this repo hand-roll its ABI decoding on the argument that the surface is four
 // shapes fixed at compile time. The debt that argument takes on is that we own the decoding
@@ -263,8 +265,11 @@ func (a *anvil) deployReceipt(bytecode, signature string, args ...string) castRe
 	a.t.Helper()
 
 	full := append([]string{"send"}, a.rpcArgs(anvilKeys[0])...)
-	full = append(full, "--json", "--create", bytecode, signature)
-	full = append(full, args...)
+	full = append(full, "--json", "--create", bytecode)
+	if signature != "" { // a contract with no constructor arguments takes no signature
+		full = append(full, signature)
+		full = append(full, args...)
+	}
 
 	receipt := a.receipt(a.cast(full...))
 	if receipt.ContractAddress == "" {

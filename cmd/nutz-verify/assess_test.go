@@ -19,6 +19,7 @@ func TestAssess_ReadsTheEngineResult(t *testing.T) {
 		Endpoints:      []string{node.Serve(t)},
 		Token:          testDeployment.Token,
 		Distributor:    testDeployment.Distributor,
+		PonsFactory:    testDeployment.PonsFactory,
 		CallsPerSecond: 1_000_000,
 	})
 	if err != nil {

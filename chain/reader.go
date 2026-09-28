@@ -156,6 +156,11 @@ type Config struct {
 	Token       Address
 	Distributor Address
 
+	// PonsFactory is the Pons launch factory, whose launch record for Token names the
+	// bonding curve the Engine excludes (ADR-0007). Optional here: LaunchCurve refuses to
+	// run without it, and epoch.New refuses a Reader whose factory is not the Deployment's.
+	PonsFactory Address
+
 	// CallsPerSecond paces every endpoint, counting each request inside a batch as one.
 	// Zero is DefaultCallsPerSecond, sized for chain 4663's public endpoint; a keyed
 	// provider allows more and a user with one raises it.
@@ -178,6 +183,7 @@ type Reader struct {
 	endpoints   []*endpoint
 	token       Address
 	distributor Address
+	factory     Address
 	concurrency int
 }
 
@@ -207,7 +213,7 @@ func New(cfg Config) (*Reader, error) {
 		return nil, fmt.Errorf("chain: %v calls per second is not a rate", rate)
 	}
 
-	r := &Reader{token: cfg.Token, distributor: cfg.Distributor, concurrency: concurrency}
+	r := &Reader{token: cfg.Token, distributor: cfg.Distributor, factory: cfg.PonsFactory, concurrency: concurrency}
 	for i, raw := range cfg.Endpoints {
 		e, err := newEndpoint(raw, i+1, client, rate)
 		if err != nil {
@@ -233,6 +239,7 @@ func New(cfg Config) (*Reader, error) {
 // header because ADR-0002 wants the unverifiable inputs shown rather than buried.
 func (r *Reader) Token() Address       { return r.token }
 func (r *Reader) Distributor() Address { return r.distributor }
+func (r *Reader) PonsFactory() Address { return r.factory }
 
 // Endpoints names the endpoints by position and host. The URLs themselves are not returned:
 // a provider URL's path is routinely an API key, and this string ends up in run headers,
@@ -449,7 +456,7 @@ func (r *Reader) Roots(ctx context.Context, from, to uint64) ([]RootPosted, erro
 // change — claimed[] moves as Allocations are collected — so a Recompute that read it at the
 // tip would be comparing against a different answer each time it ran.
 func (r *Reader) Ledger(ctx context.Context, kind Kind, id, at uint64) (Ledger, error) {
-	data, err := r.callAt(ctx, fmt.Sprintf("ledger(%s, %d)", kind, id), encodeLedgerCall(kind, id), at)
+	data, err := r.callAt(ctx, r.distributor, fmt.Sprintf("ledger(%s, %d)", kind, id), encodeLedgerCall(kind, id), at)
 	if err != nil {
 		return Ledger{}, err
 	}
@@ -465,12 +472,29 @@ func (r *Reader) Ledger(ctx context.Context, kind Kind, id, at uint64) (Ledger, 
 // other. What it is good for is confirming that the log stream reconstructs the list the
 // contract actually holds.
 func (r *Reader) Excluded(ctx context.Context, at uint64) ([]Address, error) {
-	data, err := r.callAt(ctx, "excluded()", selectorExcluded[:], at)
+	data, err := r.callAt(ctx, r.distributor, "excluded()", selectorExcluded[:], at)
 	if err != nil {
 		return nil, err
 	}
 
 	return decodeAddressArray(data)
+}
+
+// LaunchCurve is the Pons bonding curve of the Token: the curve field of the factory's
+// launch record, read cross-checked at block at. The curve is created at the Launch and
+// never changes, so any block from the Token's on gives the same answer; the Engine reads
+// it at the tip. A Token the factory never launched is an error (decodeLaunchedToken).
+func (r *Reader) LaunchCurve(ctx context.Context, at uint64) (Address, error) {
+	if r.factory == (Address{}) {
+		return Address{}, errors.New("chain: no Pons factory configured; the Token's curve cannot be read")
+	}
+
+	data, err := r.callAt(ctx, r.factory, fmt.Sprintf("getLaunchedToken(%s)", r.token), encodeGetLaunchedToken(r.token), at)
+	if err != nil {
+		return Address{}, err
+	}
+
+	return decodeLaunchedToken(data)
 }
 
 // EndBlock is the last block of Epoch epochID: the last one with timestamp < 3600(e+1).
@@ -633,13 +657,13 @@ func tooBig(err error) bool {
 	return false
 }
 
-// callAt is a cross-checked eth_call at a pinned block. The returned bytes are compared
-// undecoded, so two endpoints that disagree about a return we would have rejected anyway
-// still disagree.
-func (r *Reader) callAt(ctx context.Context, what string, data []byte, at uint64) ([]byte, error) {
+// callAt is a cross-checked eth_call against contract to at a pinned block. The returned
+// bytes are compared undecoded, so two endpoints that disagree about a return we would have
+// rejected anyway still disagree.
+func (r *Reader) callAt(ctx context.Context, to Address, what string, data []byte, at uint64) ([]byte, error) {
 	return crossCheck(ctx, r, fmt.Sprintf("%s at block %d", what, at),
 		func(ctx context.Context, e *endpoint) ([]byte, error) {
-			return e.ethCall(ctx, r.distributor, data, at)
+			return e.ethCall(ctx, to, data, at)
 		},
 		func(b []byte) []byte { return b })
 }

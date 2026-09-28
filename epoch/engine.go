@@ -97,6 +97,10 @@ func New(reader *chain.Reader, tip chain.Tip, cacheDir string, dep Deployment, o
 		return nil, fmt.Errorf("epoch: the Reader is for token %s and Distributor %s, and the Deployment pins %s and %s",
 			reader.Token(), reader.Distributor(), dep.Token, dep.Distributor)
 	}
+	if reader.PonsFactory() != dep.PonsFactory {
+		return nil, fmt.Errorf("epoch: the Reader is for Pons factory %s, and the Deployment pins %s",
+			reader.PonsFactory(), dep.PonsFactory)
+	}
 	if cacheDir == "" {
 		return nil, errors.New("epoch: no Cache directory")
 	}
@@ -239,13 +243,22 @@ func (e *Engine) sync(ctx context.Context, status *Synced) ([]twab.Transfer, err
 	return history, nil
 }
 
-// load is everything a Compute needs read once per Engine: the Cache synced and held, and
-// the whole ExcludedAppended stream through the tip. Read live: it is a handful of logs
-// from the Distributor's deploy block on.
+// load is everything a Compute needs read once per Engine: the Cache synced and held, the
+// whole ExcludedAppended stream through the tip, and the Token's bonding curve. Read live:
+// it is a handful of logs from the Distributor's deploy block on and one call.
 //
 // Through the tip and not each Epoch's end block, which is the same set for the rules: an
 // entry applies to the Epoch its block's timestamp falls in, and every block past an end
 // block is in a later Epoch.
+//
+// The curve (ADR-0007): before graduation the unsold supply sits in the Pons bonding curve
+// the factory created at the Launch, one per token, so the Distributor's base list could not
+// name it at deploy and an append through the 48-hour timelock would leave it the largest
+// Holder for two days. The Engine treats it as if an ExcludedAppended log for it had landed
+// at the dawn of time — timestamp 0, so it is in the set of every Epoch, and one more member
+// of the exclusion set hash from the first Epoch on. Reading it is one cross-checked call at
+// the tip; the curve never changes once launched, and after graduation it holds nothing, so
+// the rule stays and costs nothing. A Token the factory never launched is an error.
 func (e *Engine) load(ctx context.Context) error {
 	if e.loaded {
 		return nil
@@ -259,6 +272,12 @@ func (e *Engine) load(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	curve, err := e.reader.LaunchCurve(ctx, e.tip.Block.Number)
+	if err != nil {
+		return err
+	}
+	stream = append(stream, chain.Exclusion{Site: chain.Site{BlockNumber: e.dep.TokenBlock}, Account: curve})
 
 	replayables := make([]twab.Exclusion, 0, len(stream))
 	for _, x := range stream {

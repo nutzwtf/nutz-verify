@@ -1,0 +1,88 @@
+{
+  "name": "curve-holds-the-supply",
+  "note": "ADR-0007: the Token's Pons bonding curve is Excluded in every Epoch, read from the factory's launch record rather than from an ExcludedAppended log. The factory mints the supply of 1,000,000,000 to the curve at the Launch; Alice buys 3 and Bob 1 at the top of the hour, so the curve still holds 999,999,996 and no ExcludedAppended names it. With the curve at zero, W is 40,000 and Alice and Bob split funded [1000, 0, 500, 1, 0] as 3:1 — [750, 0, 375, 0, 0] and [250, 0, 125, 0, 0]. Counting the curve would make W about 1e13, floor both Holders to nothing, omit them from the tree and hand the whole Epoch's fees to an address that can never claim; that is the two-day window an on-chain append through the 48 h timelock would open, and the rule this Case pins closes.",
+  "epochId": 1000,
+  "devWallet": "0x0000000000000000000000000000000000000000",
+  "curve": "0xc0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0",
+  "transfers": [
+    {
+      "timestamp": 1,
+      "from": "0x0000000000000000000000000000000000000000",
+      "to": "0xc0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0",
+      "value": "1000000000"
+    },
+    {
+      "timestamp": 3600000,
+      "from": "0xc0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0",
+      "to": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "value": "3"
+    },
+    {
+      "timestamp": 3600000,
+      "from": "0xc0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0",
+      "to": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "value": "1"
+    }
+  ],
+  "excludedAt": [],
+  "funded": [
+    "1000",
+    "0",
+    "500",
+    "1",
+    "0"
+  ],
+  "carryIn": [
+    "0",
+    "0",
+    "0",
+    "0",
+    "0"
+  ],
+  "expected": {
+    "totalWeight": "40000",
+    "allocations": [
+      {
+        "account": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "twab": "3",
+        "multBps": 10000,
+        "weight": "30000",
+        "amounts": [
+          "750",
+          "0",
+          "375",
+          "0",
+          "0"
+        ]
+      },
+      {
+        "account": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        "twab": "1",
+        "multBps": 10000,
+        "weight": "10000",
+        "amounts": [
+          "250",
+          "0",
+          "125",
+          "0",
+          "0"
+        ]
+      }
+    ],
+    "totals": [
+      "1000",
+      "0",
+      "500",
+      "0",
+      "0"
+    ],
+    "carryOut": [
+      "0",
+      "0",
+      "0",
+      "1",
+      "0"
+    ],
+    "root": "0x026c89593576f843e0b29eac6ec0c4b9b58922ceac19811ca89c86b3f6a3c560"
+  }
+}

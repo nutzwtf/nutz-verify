@@ -26,6 +26,12 @@ type Deployment struct {
 	Distributor chain.Address
 	DevWallet   chain.Address
 
+	// PonsFactory is the Pons launch factory, whose launch record for Token names the
+	// bonding curve that holds the unsold supply before graduation. The Engine excludes
+	// that curve in every Epoch (ADR-0007): like the Dev wallet it is a rule the contracts
+	// never see, unlike it the address is read from the chain rather than pinned here.
+	PonsFactory chain.Address
+
 	// TokenBlock is the block NUTZ was created in: where the Transfer history, and so the
 	// Cache, begins. DistributorBlock is where the Distributor was deployed: where its
 	// ExcludedAppended and RootPosted streams begin, and the constructor's ExcludedAppended
@@ -44,18 +50,27 @@ type Deployment struct {
 // would report an Epoch with no transfers and no Root, confidently.
 func Pinned() Deployment {
 	return Deployment{
-		ChainID: 4663,
+		ChainID:     4663,
+		PonsFactory: ponsFactory4663,
 	}
+}
+
+// ponsFactory4663 is PonsV2LaunchFactory on chain 4663 (engineering spec §2.4), the one
+// address of the Deployment that exists before the Launch.
+var ponsFactory4663 = chain.Address{
+	0x7e, 0xd5, 0x98, 0xbc, 0xef, 0x8b, 0xd9, 0xed, 0xd8, 0xc9,
+	0x7a, 0x19, 0x5c, 0x6d, 0x13, 0xf4, 0x08, 0x01, 0xec, 0x7e,
 }
 
 // ErrNotPinned is why an unpinned build cannot run. It is INDETERMINATE: no check happened.
 var ErrNotPinned = errors.New("this build is not pinned to a deployment: NUTZ has not launched, " +
 	"and epoch/deployment.go has no Token, Distributor and DEV_WALLET to verify against")
 
-// Check refuses a Deployment that could not name a Distributor and token to read.
+// Check refuses a Deployment that could not name a Distributor and token to read, or the
+// factory whose launch record names the Token's curve.
 func (d Deployment) Check() error {
 	if d.ChainID == 0 || d.Token == (chain.Address{}) || d.Distributor == (chain.Address{}) ||
-		d.DevWallet == (chain.Address{}) {
+		d.DevWallet == (chain.Address{}) || d.PonsFactory == (chain.Address{}) {
 		return ErrNotPinned
 	}
 

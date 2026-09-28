@@ -22,6 +22,7 @@ func TestAnvil(t *testing.T) {
 		Endpoints:      []string{w.rpc},
 		Token:          w.nutz,
 		Distributor:    w.distributor,
+		PonsFactory:    w.factory,
 		CallsPerSecond: unpaced, // a local node has no budget to respect
 	})
 	if err != nil {
@@ -310,6 +311,28 @@ func TestAnvil(t *testing.T) {
 		}
 	})
 
+	t.Run("the Token's curve from the factory's launch record", func(t *testing.T) {
+		// ADR-0007: one cross-checked call, decoded from the fifteen-word struct foundry
+		// encoded rather than from a layout we assumed.
+		curve, err := reader.LaunchCurve(ctx, head.Block.Number)
+		if err != nil {
+			t.Fatalf("LaunchCurve = %v", err)
+		}
+		if curve != w.curve {
+			t.Errorf("curve = %s, want %s", curve, w.curve)
+		}
+
+		// A token the factory never launched reads back exists == false, which is an error
+		// and never an empty set.
+		other, err := New(Config{Endpoints: []string{w.rpc}, Token: w.dead, Distributor: w.distributor, PonsFactory: w.factory, CallsPerSecond: unpaced})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := other.LaunchCurve(ctx, head.Block.Number); err == nil || !strings.Contains(err.Error(), "no launch record") {
+			t.Errorf("LaunchCurve for a token never launched = %v", err)
+		}
+	})
+
 	t.Run("two endpoints over one node agree", func(t *testing.T) {
 		// Not a tautology worth much on its own, but it exercises the concurrent path and
 		// the canonical comparison against real responses: a comparison that spuriously
@@ -318,6 +341,7 @@ func TestAnvil(t *testing.T) {
 			Endpoints:      []string{w.rpc, w.rpc},
 			Token:          w.nutz,
 			Distributor:    w.distributor,
+			PonsFactory:    w.factory,
 			CallsPerSecond: unpaced, // a local node has no budget to respect
 		})
 		if err != nil {
@@ -342,6 +366,7 @@ func TestAnvil(t *testing.T) {
 			Endpoints:      []string{w.rpc, "http://127.0.0.1:1"},
 			Token:          w.nutz,
 			Distributor:    w.distributor,
+			PonsFactory:    w.factory,
 			CallsPerSecond: unpaced, // a local node has no budget to respect
 		})
 		if err != nil {
@@ -374,6 +399,11 @@ type world struct {
 	distributor      Address
 	nutzBlock        uint64
 	distributorBlock uint64
+
+	// factory is MockPonsFactory, told that it launched nutz with curve (ADR-0007). The
+	// curve holds no NUTZ here; the Cases pin the case where it holds the supply.
+	factory Address
+	curve   Address
 
 	// epochA is funded, rooted, and preceded by a funded Epoch the Root skips. epochB is 49
 	// Epochs later — past the Distributor's 48-hour timelock — and is where the late
@@ -429,6 +459,12 @@ func buildWorld(t *testing.T) *world {
 	mock := node.bytecode("MockERC20")
 	nutzReceipt := node.deployReceipt(mock, "constructor(string,string)", "NUTZ", "NUTZ")
 	w.nutz, w.nutzBlock = node.address(nutzReceipt.ContractAddress), node.blockOf(nutzReceipt)
+
+	w.curve = node.address("0x00000000000000000000000000000000000000c0")
+	w.factory = node.deploy(node.bytecode("MockPonsFactory"), "")
+	node.send(w.factory, "setLaunchedToken(address,(address,address,address,address,address,uint256,uint24,int24,uint16,bool,uint8,uint256,uint256,uint256,bool))",
+		w.nutz.String(), fmt.Sprintf("(%s,%s,%s,%s,%s,0,0,0,0,false,0,0,0,0,true)",
+			w.nutz, w.curve, node.accounts[0], node.accounts[0], Address{}))
 
 	var tokens [TokenCount]Address
 	for i, symbol := range []string{"SPY", "NVDA", "MU", "SPCX", "USDG"} {

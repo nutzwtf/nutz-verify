@@ -35,6 +35,11 @@ type Node struct {
 	logs    []wireLog
 	Ledgers map[uint64]Ledger // by Epoch id
 
+	// Factory answers getLaunchedToken for the tokens in Curves, as the Pons factory does;
+	// see Launch. Unset, every eth_call is the Distributor's.
+	Factory chain.Address
+	Curves  map[chain.Address]chain.Address
+
 	// HTTPStatus, when non-zero, is answered to every request instead of a reply.
 	HTTPStatus int
 
@@ -189,13 +194,14 @@ func (n *Node) dispatch(req rpcRequest) (any, error) {
 		return n.getLogs(filter.FromBlock, filter.ToBlock, filter.Address, filter.Topics[0])
 	case "eth_call":
 		var call struct {
+			To   string `json:"to"`
 			Data string `json:"data"`
 		}
 		if err := json.Unmarshal(req.Params[0], &call); err != nil {
 			return nil, err
 		}
 
-		return n.call(call.Data)
+		return n.call(call.To, call.Data)
 	default:
 		return nil, fmt.Errorf("unsupported method %s", req.Method)
 	}
@@ -254,10 +260,14 @@ func (n *Node) getLogs(fromHex, toHex, address, topic0 string) (any, error) {
 
 // call answers ledger(kind, id): the selector, a kind word and an id word in, eighteen
 // static words out. Anything else is an address with no code, which returns nothing.
-func (n *Node) call(data string) (any, error) {
+func (n *Node) call(to, data string) (any, error) {
 	raw, err := hex.DecodeString(strings.TrimPrefix(data, "0x"))
 	if err != nil {
 		return nil, err
+	}
+
+	if n.Factory != (chain.Address{}) && strings.EqualFold(to, n.Factory.String()) {
+		return n.factoryCall(raw)
 	}
 
 	if len(raw) != 4+64 || !bytes.Equal(raw[:4], selector("ledger(uint8,uint256)")) || raw[4+31] != 0 {
@@ -285,6 +295,46 @@ func (n *Node) call(data string) (any, error) {
 	}
 
 	return "0x" + hex.EncodeToString(out), nil
+}
+
+// factoryCall answers getLaunchedToken(token) as IPonsV2LaunchFactory encodes it: fifteen
+// static words, curve second and exists last. A token never launched reads back all zero
+// with exists == false, as on the real factory; anything else is empty data.
+func (n *Node) factoryCall(raw []byte) (any, error) {
+	if len(raw) != 4+32 || !bytes.Equal(raw[:4], selector("getLaunchedToken(address)")) {
+		return "0x", nil
+	}
+
+	var token chain.Address
+	copy(token[:], raw[4+12:])
+	curve, launched := n.Curves[token]
+
+	words := make([]*big.Int, 15)
+	for i := range words {
+		words[i] = new(big.Int)
+	}
+	if launched {
+		words[0].SetBytes(token[:])
+		words[1].SetBytes(curve[:])
+		words[14].SetInt64(1)
+	}
+
+	var out []byte
+	for _, w := range words {
+		out = append(out, word(w)...)
+	}
+
+	return "0x" + hex.EncodeToString(out), nil
+}
+
+// Launch records that factory launched token with the given bonding curve, so that
+// getLaunchedToken(token) at the factory answers with it (ADR-0007).
+func (n *Node) Launch(factory, token, curve chain.Address) {
+	n.Factory = factory
+	if n.Curves == nil {
+		n.Curves = map[chain.Address]chain.Address{}
+	}
+	n.Curves[token] = curve
 }
 
 // DropLastLog forgets the most recently appended log, so a test can re-post a Root.

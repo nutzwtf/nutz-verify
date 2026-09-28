@@ -32,6 +32,12 @@ var (
 	treasury    = repeatAddr(0xcc) // Excluded from the deploy block
 	alice       = repeatAddr(0xa1)
 	bob         = repeatAddr(0xb2)
+
+	// factory is the Pons factory of the fake chain and curve the bonding curve it launched
+	// the token with (ADR-0007). The curve holds nothing in this scenario, so excluding it
+	// changes no number; the Cases pin the case where it holds the supply.
+	factory = repeatAddr(0xfa)
+	curve   = repeatAddr(0xc0)
 )
 
 // caseRoot is testdata/cases/funding-plus-carry.json's expected root, produced by
@@ -61,6 +67,7 @@ var testDeployment = epoch.Deployment{
 	Token:            token,
 	Distributor:      distributor,
 	DevWallet:        devWallet,
+	PonsFactory:      factory,
 	TokenBlock:       1,
 	DistributorBlock: 5990,
 }
@@ -85,6 +92,7 @@ func scenario() *fakenode.Node {
 	n.Tips["safe"] = 6012
 	n.Tips["finalized"] = 6004
 
+	n.Launch(factory, token, curve)
 	n.Exclusion(5990, distributor, treasury)
 	n.Transfer(1, token, chain.Address{}, treasury, 1000000)
 	n.Transfer(5999, token, treasury, alice, 3)

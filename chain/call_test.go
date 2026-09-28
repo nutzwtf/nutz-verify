@@ -23,6 +23,59 @@ func TestSelectors_MatchTheContractSignatures(t *testing.T) {
 	if got := hexBytes(selectorExcluded[:]); got != excludedSelector {
 		t.Errorf("excluded selector = %s, want %s", got, excludedSelector)
 	}
+	// cast sig "getLaunchedToken(address)"
+	if got := hexBytes(selectorGetLaunchedToken[:]); got != "0x3cf28b5a" {
+		t.Errorf("getLaunchedToken selector = %s, want 0x3cf28b5a", got)
+	}
+}
+
+func TestDecodeLaunchedToken(t *testing.T) {
+	t.Parallel()
+
+	var curve Address
+	for i := range curve {
+		curve[i] = 0xc0
+	}
+
+	record := func(exists bool, curve Address) []byte {
+		data := make([]byte, launchedTokenWords*wordSize)
+		copy(data[wordSize+12:], curve[:]) // curve is the second field
+		if exists {
+			data[launchedTokenWords*wordSize-1] = 1
+		}
+
+		return data
+	}
+
+	got, err := decodeLaunchedToken(record(true, curve))
+	if err != nil || got != curve {
+		t.Fatalf("decodeLaunchedToken = %s, %v; want %s", got, err, curve)
+	}
+
+	for name, data := range map[string][]byte{
+		// eth_call against an address with no code returns empty data; a struct decoded
+		// from it would read as "exists == false" by accident rather than by the factory's
+		// word, and the message should say the struct was not there at all.
+		"nothing at all":         nil,
+		"fourteen words":         record(true, curve)[:14*wordSize],
+		"never launched":         record(false, Address{}),
+		"a record with no curve": record(true, Address{}),
+	} {
+		if _, err := decodeLaunchedToken(data); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestEncodeGetLaunchedToken(t *testing.T) {
+	t.Parallel()
+
+	var token Address
+	token[19] = 0x01
+	got := encodeGetLaunchedToken(token)
+	if len(got) != selectorSize+wordSize || !bytes.Equal(got[:4], selectorGetLaunchedToken[:]) || got[len(got)-1] != 0x01 {
+		t.Errorf("encodeGetLaunchedToken = %x", got)
+	}
 }
 
 func TestEncodeLedgerCall(t *testing.T) {
