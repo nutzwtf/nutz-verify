@@ -67,6 +67,13 @@ in private code around it. With a Root already posted, the four lines are as the
 fifth, `expected`, says whether the Expectation equals it. The Expectation is echoed in the header and
 beside `posted`: it is the one input a run has that came from neither the chain nor the build.
 
+**The Token's Pons curve is Excluded.** Before graduation the unsold supply sits in the bonding
+curve the Pons factory created at the Launch, an address the Distributor's base list could not
+name at deploy. The Engine reads it from the factory's launch record once per run and treats it
+as Excluded in every Epoch, one more member of the exclusion set from the first Epoch on
+([ADR-0007](docs/adr/0007-the-token-curve-is-excluded.md)). A Token the factory never launched
+is INDETERMINATE.
+
 **`2` is never `0`.** The warm Signer signs only on `0`; "could not check" is not "checked and
 fine" ([ADR-0002](docs/adr/0002-rpc-only-and-what-match-asserts.md)).
 
