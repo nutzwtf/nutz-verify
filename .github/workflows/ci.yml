@@ -107,7 +107,7 @@ jobs:
           path: nutz-contracts
           submodules: recursive
       - uses: foundry-rs/foundry-toolchain@v1
-        with: { version: v1.8.1 }       # pinned to nutz-contracts' .mise.toml and its own CI
+        with: { version: v1.8.3 }       # pinned to nutz-contracts' .mise.toml and its own CI
       - run: forge build
         working-directory: nutz-contracts
       - id: go
