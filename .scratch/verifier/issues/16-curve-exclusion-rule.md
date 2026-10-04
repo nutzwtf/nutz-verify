@@ -80,3 +80,30 @@ harness passes on a fork of 4663 with the factory mock (17 subtests). Not releas
 release waits for the Pin, and the two ship together. Outside this repo and not done here:
 robinhood.json's `excludedBase` gaining the v4 PoolManager and the global Pons contracts, and
 §10 step 5 losing the graduation append.
+
+**2026-10-04, released ahead of the Pin.** nutz-platform asked for the rule before launch day
+(its launch ticket 04, the Pin writer), so it moves to the new `epoch.Deployment` now and
+tests it nightly: v0.4.0 carries the rule and stays unpinned, `Pinned()` naming only ChainID
+and the Pons factory, so like v0.3.0 every run is exit 2 "not pinned". "Ships with the Pin"
+above, and in ADR-0007's Consequences, protected the first Root, and no Root is computed
+before the Pin either way. The Pin is the next minor, written by nutz-platform's `pin.sh`.
+
+Before the tag: ADR-0007 and this ticket's docs committed (e119a1d), and two tests that used
+`epoch.Pinned()` to mean "no addresses" now pass `epoch.Deployment{ChainID: 4663}` (40d4ac4),
+so the Pin does not turn the suite red. The harness job had been red nightly since
+2026-09-30: nutz-contracts moved to Foundry 1.8.3 in 2d9412f and its lint config fails
+under 1.8.1; the CI pin follows it (0592676), CI green (run 37232994249).
+
+Tagged v0.4.0 on 0592676 (05926763d9b816301ff8bbc8bda52ae35030ef29); release run 37233336684
+built it on ubuntu-latest and macos-latest with identical checksums, published, and verified
+the download in a clean container. Reproduced from source on two more machines — this host
+with `scripts/build-release.sh` from `git archive v0.4.0`, and a fresh `golang:1.26-bookworm`
+container from the same archive — both identical to the published SHA256SUMS:
+
+    526e4bfca4cc232dfe62f0858c17b8170ffebe750d9fd7807a4c9bbe69c5293b  nutz-verify_linux_amd64
+    0128ebb0655b5324576d835cbd47a9de2e9b963526892e051416812d3e06d5a0  nutz-verify_linux_arm64
+    f6b81604253825296c28096978a6a19afbfc4e094699578cfc83f8397970eeb9  nutz-verify_darwin_amd64
+    552c17022b2635b84452e42f038f355e5ca61348571795dfbba4a932c847ac37  nutz-verify_darwin_arm64
+
+The linux/amd64 binary run against chain 4663's public endpoint: zero addresses in the
+header, exit 2.
