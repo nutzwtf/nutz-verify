@@ -51,7 +51,8 @@ func TestNew_RefusesAReaderForAnotherDeployment(t *testing.T) {
 		t.Fatal("New accepted a Reader for another Pons factory")
 	}
 
-	if _, err := epoch.New(reader, chain.Tip{Finality: chain.Safe}, t.TempDir(), epoch.Pinned(), epoch.Options{}); !errors.Is(err, epoch.ErrNotPinned) {
+	// A Deployment with no addresses, as the shipped one is until launch; not epoch.Pinned() itself, which the Pin fills in.
+	if _, err := epoch.New(reader, chain.Tip{Finality: chain.Safe}, t.TempDir(), epoch.Deployment{ChainID: 4663}, epoch.Options{}); !errors.Is(err, epoch.ErrNotPinned) {
 		t.Fatalf("New with the unpinned Deployment: %v, want ErrNotPinned", err)
 	}
 }

@@ -531,9 +531,9 @@ func TestArtifacts_CannotMaskAMismatch(t *testing.T) {
 }
 
 func TestRun_UnpinnedBuildRefusesToRun(t *testing.T) {
-	// The shipped pinned Deployment has no addresses until launch. Exit 2, never a
-	// confident answer about a zero address.
-	code, stdout, _ := cli(t, epoch.Pinned(), []*fakenode.Node{scenario()}, "epoch", "1000")
+	// A Deployment with no addresses, as the shipped one is until launch. Exit 2, never a
+	// confident answer about a zero address. Not epoch.Pinned() itself: the Pin fills it in.
+	code, stdout, _ := cli(t, epoch.Deployment{ChainID: 4663}, []*fakenode.Node{scenario()}, "epoch", "1000")
 
 	if code != 2 {
 		t.Fatalf("exit %d, want 2", code)
